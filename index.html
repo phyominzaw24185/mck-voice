@@ -132,6 +132,15 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
         <button class="chip" type="button" data-mode="todo" aria-pressed="false">To-Do</button>
       </div>
     </div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
+      <span class="label">ဘာသာစကား</span>
+      <div class="chip-group" id="langs">
+        <button class="chip" type="button" data-lang="mix" aria-pressed="true">မြန်မာ + English</button>
+        <button class="chip" type="button" data-lang="en" aria-pressed="false">English သက်သက်</button>
+        <button class="chip" type="button" data-lang="to_en" aria-pressed="false">English ဘာသာပြန်</button>
+        <button class="chip" type="button" data-lang="to_my" aria-pressed="false">မြန်မာ ဘာသာပြန်</button>
+      </div>
+    </div>
   </section>
 
   <section class="panel" id="resultPanel" hidden>
@@ -213,14 +222,35 @@ const MODE_LABEL = { clean:'စာသား', verbatim:'ပြောသည့်
 function renderModes(){ document.querySelectorAll('#modes .chip').forEach(b=>b.setAttribute('aria-pressed', String(b.dataset.mode===mode))); }
 $('modes').addEventListener('click', e=>{ const b=e.target.closest('.chip'); if(!b) return; mode=b.dataset.mode; store.set('mck.mode',mode); renderModes(); });
 
+// ---------- language ----------
+const LANG_LABEL = { mix:'မြန်မာ + English', en:'English', to_en:'→ English', to_my:'→ မြန်မာ' };
+let lang = store.get('mck.lang', 'mix');
+function renderLangs(){ document.querySelectorAll('#langs .chip').forEach(b=>b.setAttribute('aria-pressed', String(b.dataset.lang===lang))); }
+$('langs').addEventListener('click', e=>{ const b=e.target.closest('.chip'); if(!b) return; lang=b.dataset.lang; store.set('mck.lang',lang); renderLangs(); });
+const outEnglish = () => lang==='en' || lang==='to_en';
+
 function transcribePrompt(){
-  const vocab = cfg.vocab ? `\nဤအသံထဲတွင် ပါနိုင်သော အထူးစကားလုံးများ: ${cfg.vocab}` : '';
-  if(mode==='verbatim') return `You are a professional Burmese (Myanmar) transcriber. Transcribe this audio word for word exactly as spoken, in Myanmar Unicode script. Keep filler words and repetitions. Words spoken in English stay in English. Output only the transcript, no commentary.${vocab}`;
-  return `You are a professional Burmese (Myanmar) transcriber. Transcribe this audio accurately into Myanmar Unicode script (not Zawgyi). Use correct Burmese spelling, add proper punctuation (၊ and ။), and break into paragraphs where the topic changes. Remove filler sounds like "အဲ", "အင်း" but do not change the meaning or summarize. Words spoken in English stay in English. If there are several speakers, start each turn on a new line. Output only the transcript, no commentary.${vocab}`;
+  const vocab = cfg.vocab ? `\nTerms that may appear in this audio (spell them exactly like this): ${cfg.vocab}` : '';
+  const verbatim = mode==='verbatim';
+  const style = verbatim
+    ? 'Transcribe word for word exactly as spoken. Keep filler words and repetitions.'
+    : 'Add proper punctuation and break into paragraphs where the topic changes. Remove filler sounds (အဲ, အင်း, um, uh) but do not change the meaning or summarize. If there are several speakers, start each turn on a new line.';
+  if(lang==='en') return `You are a professional English transcriber. Transcribe this English audio accurately in English. ${style} Output only the transcript, no commentary.${vocab}`;
+  return `You are a professional transcriber for Burmese (Myanmar) and English. The speaker may speak Burmese, English, or switch between both in the same sentence (code-switching). Write every Burmese part in Myanmar Unicode script (not Zawgyi) with correct Burmese spelling and Burmese punctuation (၊ ။). Write every English word or phrase in English Latin letters exactly as spoken, e.g. "မနက်ဖြန် meeting ကို ၁၀ နာရီ ရွှေ့မယ်။". Never transliterate English words into Myanmar script, and never translate between the two languages. ${style} Output only the transcript, no commentary.${vocab}`;
+}
+function translatePrompt(text){
+  if(lang==='to_en') return `Translate the following Burmese/English transcript into clear, natural English. Keep names, numbers and the paragraph structure. Output only the translation.\n\n${text}`;
+  if(lang==='to_my') return `အောက်ပါ စာကို သဘာဝကျပြီး ရှင်းလင်းသော မြန်မာစာ (Unicode) သို့ ဘာသာပြန်ပါ။ လူအမည်၊ ကုမ္ပဏီအမည်၊ နည်းပညာ အသုံးအနှုန်းအချို့ကို English အတိုင်း ထားနိုင်ပါတယ်။ စာပိုဒ်ခွဲပုံကို ထိန်းထားပါ။ ဘာသာပြန်ချက်သာ ထုတ်ပေးပါ။\n\n${text}`;
+  return null;
 }
 function postPrompt(text){
-  if(mode==='summary') return `အောက်ပါ မြန်မာစာ transcript ကို မြန်မာလို အနှစ်ချုပ်ပါ။ ပထမ စာကြောင်း ၁-၂ ကြောင်းဖြင့် အဓိကအကြောင်းအရာ၊ ထို့နောက် အချက်အလက် အဓိကများကို "• " ဖြင့် စာရင်းပြုပါ။ Markdown သင်္ကေတ (** #) မသုံးပါနှင့်။ အနှစ်ချုပ်သာ ထုတ်ပေးပါ။\n\n${text}`;
-  if(mode==='todo') return `အောက်ပါ မြန်မာစာ transcript ထဲမှ လုပ်ရန်ကိစ္စများကို To-Do စာရင်းအဖြစ် မြန်မာလို ထုတ်ပေးပါ။ တစ်ကြောင်းလျှင် တစ်ခု၊ "☐ " ဖြင့် စပါ။ ရက်စွဲ/အချိန်/လူအမည် ပါလျှင် ထည့်ပါ။ Markdown သင်္ကေတ မသုံးပါနှင့်။ စာရင်းသာ ထုတ်ပေးပါ။\n\n${text}`;
+  if(outEnglish()){
+    if(mode==='summary') return `Summarize the following transcript in English. Start with 1-2 sentences on the main topic, then list the key points, each starting with "• ". Do not use Markdown symbols (** #). Output only the summary.\n\n${text}`;
+    if(mode==='todo') return `Extract the action items from the following transcript as an English to-do list. One item per line, each starting with "☐ ". Include dates, times and names when mentioned. Do not use Markdown symbols. Output only the list.\n\n${text}`;
+    return null;
+  }
+  if(mode==='summary') return `အောက်ပါ transcript ကို မြန်မာလို အနှစ်ချုပ်ပါ။ ပထမ စာကြောင်း ၁-၂ ကြောင်းဖြင့် အဓိကအကြောင်းအရာ၊ ထို့နောက် အချက်အလက် အဓိကများကို "• " ဖြင့် စာရင်းပြုပါ။ English လို ပြောထားသော အသုံးအနှုန်းများကို English အတိုင်း ထားပါ။ Markdown သင်္ကေတ (** #) မသုံးပါနှင့်။ အနှစ်ချုပ်သာ ထုတ်ပေးပါ။\n\n${text}`;
+  if(mode==='todo') return `အောက်ပါ transcript ထဲမှ လုပ်ရန်ကိစ္စများကို To-Do စာရင်းအဖြစ် မြန်မာလို ထုတ်ပေးပါ။ တစ်ကြောင်းလျှင် တစ်ခု၊ "☐ " ဖြင့် စပါ။ ရက်စွဲ/အချိန်/လူအမည် ပါလျှင် ထည့်ပါ။ Markdown သင်္ကေတ မသုံးပါနှင့်။ စာရင်းသာ ထုတ်ပေးပါ။\n\n${text}`;
   return null;
 }
 
@@ -234,8 +264,31 @@ function extractText(json){
   }
   return t;
 }
+const sleep = ms => new Promise(r=>setTimeout(r,ms));
+function fallbackModels(){
+  const list = (cfg.models && cfg.models.length) ? cfg.models : ['gemini-3.8-flash','gemini-3.7-flash','gemini-3.6-flash','gemini-3.5-flash','gemini-3.5-flash-lite'];
+  const flash = list.filter(m=>/flash/.test(m) && !/(tts|image|live|transcribe)/.test(m) && m!==cfg.model);
+  return [cfg.model, ...flash.slice(0,3)];
+}
+// Retries busy/overloaded errors, then moves on to the next model.
 async function gemini(parts){
-  const res = await fetch(`${API}/models/${encodeURIComponent(cfg.model)}:generateContent`, {
+  const models = fallbackModels(); let lastErr;
+  for(let mi=0; mi<models.length; mi++){
+    for(let attempt=0; attempt<2; attempt++){
+      try{ return await geminiOnce(parts, models[mi]); }
+      catch(e){
+        lastErr = e;
+        if(!e.retryable) throw e;
+        const next = attempt===0 ? `${models[mi]} ကို ပြန်စမ်းနေပါတယ်…` : (models[mi+1] ? `${models[mi+1]} နဲ့ ပြောင်းစမ်းနေပါတယ်…` : '');
+        if(next) setStatus(`<span class="spinner"></span> Model အလုပ်များနေလို့ ${next}`);
+        if(attempt===0) await sleep(2500);
+      }
+    }
+  }
+  throw lastErr;
+}
+async function geminiOnce(parts, model){
+  const res = await fetch(`${API}/models/${encodeURIComponent(model)}:generateContent`, {
     method:'POST',
     headers:{'Content-Type':'application/json','x-goog-api-key':cfg.key},
     body: JSON.stringify({ contents:[{ role:'user', parts }], generationConfig:{ temperature:0.2 } })
@@ -244,9 +297,12 @@ async function gemini(parts){
   if(!res.ok){
     const msg = json?.error?.message || res.statusText;
     if(res.status===400 && /API key/i.test(msg)) throw new Error('API key မှားနေပါတယ်။ Settings မှာ စစ်ပါ။');
-    if(res.status===404) throw new Error(`Model "${cfg.model}" မရှိပါ။ Settings မှာ "Model စာရင်းယူ" နှိပ်ပြီး ပြန်ရွေးပါ။`);
-    if(res.status===429) throw new Error('အသုံးပြုမှု ကန့်သတ်ချက် ပြည့်သွားပါပြီ။ ခဏနေမှ ပြန်စမ်းပါ။');
-    throw new Error(`${res.status}: ${msg}`);
+    let err;
+    if(res.status===404){ err = new Error(`Model "${model}" မရှိပါ။ Settings မှာ "Model စာရင်းယူ" နှိပ်ပြီး ပြန်ရွေးပါ။`); err.retryable = model!==cfg.model; }
+    else if(res.status===429){ err = new Error('အသုံးပြုမှု ကန့်သတ်ချက် ပြည့်သွားပါပြီ။ ခဏနေမှ ပြန်စမ်းပါ။'); err.retryable = true; }
+    else if(res.status>=500){ err = new Error('Google ဘက်က Model တွေ အလုပ်များနေပါတယ်။ ခဏနေမှ "ပြန်စမ်းမည်" ကို နှိပ်ပါ။'); err.retryable = true; }
+    else err = new Error(`${res.status}: ${msg}`);
+    throw err;
   }
   return extractText(json);
 }
@@ -293,10 +349,12 @@ async function process(blob, name){
     const { chunks, duration } = await toWavChunks(blob);
     const pieces=[];
     for(let i=0;i<chunks.length;i++){
-      setStatus(`<span class="spinner"></span> မြန်မာစာ ပြောင်းနေပါတယ်… ${chunks.length>1?`(${i+1}/${chunks.length})`:''}`);
+      setStatus(`<span class="spinner"></span> စာအဖြစ် ပြောင်းနေပါတယ်… ${chunks.length>1?`(${i+1}/${chunks.length})`:''}`);
       pieces.push(await gemini([{ text: transcribePrompt() }, { inline_data:{ mime_type:'audio/wav', data: b64(chunks[i]) } }]));
     }
     let text = pieces.join('\n\n');
+    const tp = translatePrompt(text);
+    if(tp){ setStatus('<span class="spinner"></span> ဘာသာပြန်နေပါတယ်…'); text = await gemini([{ text:tp }]); }
     const p = postPrompt(text);
     if(p){ setStatus('<span class="spinner"></span> '+MODE_LABEL[mode]+' ပြုလုပ်နေပါတယ်…'); text = await gemini([{ text:p }]); }
     showResult(text, duration);
@@ -305,12 +363,13 @@ async function process(blob, name){
   }catch(e){
     console.error(e);
     const msg = e.name==='EncodingError' || /decode/i.test(e.message) ? 'ဒီအသံဖိုင်ကို ဖတ်မရပါ။ mp3 / m4a / wav ဖိုင်နဲ့ စမ်းပါ။' : (e.message==='Failed to fetch' ? 'အင်တာနက် ချိတ်ဆက်မှု မရပါ။' : e.message);
-    setStatus(msg, true);
+    setStatus(msg + '<br><button class="btn primary" type="button" id="retryBtn" style="margin-top:8px">ပြန်စမ်းမည် (အသံပြန်မဖမ်းရ)</button>', true);
+    const rb = $('retryBtn'); if(rb) rb.onclick = ()=>process(blob, name);
   }finally{ busy=false; $('recBtn').disabled=false; }
 }
 function showResult(text, duration){
   $('resultPanel').hidden=false; $('result').value=text;
-  $('resultMeta').textContent = `${MODE_LABEL[mode]} · ${fmt(duration)}`;
+  $('resultMeta').textContent = `${MODE_LABEL[mode]} · ${LANG_LABEL[lang]} · ${fmt(duration)}`;
 }
 $('copyBtn').onclick = ()=>copyText($('result').value);
 $('shareBtn').onclick = ()=>shareText($('result').value);
@@ -370,7 +429,7 @@ $('fileIn').onchange = e=>{ const f=e.target.files[0]; if(f){ $('timer').textCon
 
 // ---------- history ----------
 function addHistory(text, duration){
-  history.unshift({ id:Date.now(), at:new Date().toISOString(), mode, duration, text });
+  history.unshift({ id:Date.now(), at:new Date().toISOString(), mode, lang, duration, text });
   history = history.slice(0,200); store.set('mck.hist', history); renderHistory();
 }
 function renderHistory(){
@@ -379,7 +438,7 @@ function renderHistory(){
   for(const h of history){
     const d=new Date(h.at);
     const item=document.createElement('div'); item.className='item';
-    item.innerHTML=`<div class="item-meta"><span>${d.toLocaleDateString('en-GB')} ${d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})} · ${fmt(h.duration||0)}</span><span class="tag">${MODE_LABEL[h.mode]||''}</span></div><div class="item-text"></div><div class="actions"><button class="btn" data-a="copy" type="button">Copy</button><button class="btn" data-a="share" type="button">Share</button><button class="btn" data-a="more" type="button">အပြည့်ကြည့်</button><button class="btn" data-a="del" type="button">ဖျက်</button></div>`;
+    item.innerHTML=`<div class="item-meta"><span>${d.toLocaleDateString('en-GB')} ${d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})} · ${fmt(h.duration||0)}</span><span class="tag">${MODE_LABEL[h.mode]||''}${h.lang && h.lang!=='mix' ? ' · '+LANG_LABEL[h.lang] : ''}</span></div><div class="item-text"></div><div class="actions"><button class="btn" data-a="copy" type="button">Copy</button><button class="btn" data-a="share" type="button">Share</button><button class="btn" data-a="more" type="button">အပြည့်ကြည့်</button><button class="btn" data-a="del" type="button">ဖျက်</button></div>`;
     item.querySelector('.item-text').textContent=h.text;
     item.addEventListener('click', e=>{
       const a=e.target.closest('button')?.dataset.a; if(!a) return;
@@ -427,7 +486,7 @@ $('settingsForm').addEventListener('submit', ()=>{
   store.set('mck.cfg',cfg); refreshNotice(); toast('သိမ်းပြီးပါပြီ');
 });
 
-renderModes(); renderHistory(); refreshNotice();
+renderModes(); renderLangs(); renderHistory(); refreshNotice();
 if(!cfg.key) setTimeout(openSettings, 400);
 })();
 </script>
