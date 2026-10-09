@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="my">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1F6B55">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>MCK Voice to Text</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Myanmar:wght@400;600;700&display=swap">
+<style>
+:root{
+  --bg:#F2F4F1; --surface:#FFFFFF; --ink:#1B2420; --muted:#66736C; --line:#DCE2DD;
+  --accent:#1F6B55; --accent-soft:#E1EEE8; --rec:#D2453A; --rec-soft:#FBE6E3; --warn:#9A6A12;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#121815; --surface:#1B2320; --ink:#E7EDE9; --muted:#95A39B; --line:#2C3833;
+    --accent:#5FC19E; --accent-soft:#1F3A30; --rec:#F06B5F; --rec-soft:#3A2220; --warn:#E0B062;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#121815; --surface:#1B2320; --ink:#E7EDE9; --muted:#95A39B; --line:#2C3833;
+  --accent:#5FC19E; --accent-soft:#1F3A30; --rec:#F06B5F; --rec-soft:#3A2220; --warn:#E0B062;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  background:var(--bg); color:var(--ink);
+  font-family:"Noto Sans Myanmar","Myanmar Text","Padauk",system-ui,sans-serif;
+  font-size:15px; line-height:1.9;
+  padding:env(safe-area-inset-top,0px) 16px calc(env(safe-area-inset-bottom,0px) + 24px);
+}
+.wrap{max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+header{display:flex;align-items:center;justify-content:space-between;padding-block:14px 0}
+.brand{display:flex;align-items:center;gap:10px}
+.logo{width:38px;height:38px;border-radius:50%;background:var(--accent);color:var(--surface);
+  display:grid;place-items:center;font-weight:700;font-size:13px;letter-spacing:.04em}
+.brand h1{font-size:17px;margin:0;line-height:1.3}
+.brand small{display:block;color:var(--muted);font-size:12px;line-height:1.4}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.icon-btn{border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:6px 12px;font-size:13px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:18px}
+
+/* recorder */
+.recorder{display:flex;flex-direction:column;align-items:center;gap:14px;padding-block:26px}
+.timer{font-variant-numeric:tabular-nums;font-size:34px;font-weight:600;letter-spacing:.02em;line-height:1}
+.status{color:var(--muted);font-size:13px;text-align:center;min-height:1.9em}
+.rec-btn{width:96px;height:96px;border-radius:50%;border:0;background:var(--rec);
+  display:grid;place-items:center;box-shadow:0 0 0 8px var(--rec-soft);transition:transform .15s}
+.rec-btn:active{transform:scale(.96)}
+.rec-btn .dot{width:34px;height:34px;border-radius:50%;background:#fff;transition:all .2s}
+.rec-btn.on .dot{border-radius:6px;width:30px;height:30px}
+.rec-btn.on{animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 8px var(--rec-soft)}50%{box-shadow:0 0 0 16px var(--rec-soft)}}
+@media (prefers-reduced-motion:reduce){.rec-btn.on{animation:none}}
+.rec-btn:disabled{opacity:.45;cursor:not-allowed}
+canvas#wave{width:100%;max-width:320px;height:44px}
+.row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+.chip-group{display:flex;gap:8px;flex-wrap:wrap}
+.chip{border:1px solid var(--line);background:transparent;border-radius:999px;padding:4px 14px;font-size:13px}
+.chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--surface)}
+.upload{border:1px dashed var(--line);border-radius:10px;padding:6px 14px;font-size:13px;color:var(--muted);background:transparent}
+.label{font-size:12px;color:var(--muted);letter-spacing:.03em}
+
+/* result */
+textarea{width:100%;min-height:160px;border:1px solid var(--line);border-radius:12px;padding:12px;
+  background:var(--bg);color:var(--ink);font:inherit;line-height:2;resize:vertical}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:6px 14px;font-size:13px}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--surface)}
+.spinner{width:18px;height:18px;border:2px solid var(--accent-soft);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;display:inline-block;vertical-align:middle}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* history */
+.hist-head{display:flex;justify-content:space-between;align-items:baseline}
+.hist-head h2{font-size:16px;margin:0}
+.hist{display:flex;flex-direction:column;gap:10px}
+.item{border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:var(--surface)}
+.item-meta{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.tag{background:var(--accent-soft);color:var(--accent);border-radius:6px;padding:0 8px;font-size:11px}
+.item-text{margin:6px 0 8px;white-space:pre-wrap;word-break:break-word;max-height:9.5em;overflow:hidden}
+.item.open .item-text{max-height:none}
+.empty{color:var(--muted);font-size:13px;text-align:center;padding:10px}
+
+/* settings */
+dialog{border:1px solid var(--line);border-radius:16px;background:var(--surface);color:var(--ink);width:min(520px,calc(100% - 32px));padding:20px}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+.field{display:flex;flex-direction:column;gap:4px;margin-bottom:14px}
+.field input,.field select{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);width:100%}
+.hint{font-size:12px;color:var(--muted);line-height:1.7}
+.hint a{color:var(--accent)}
+.toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 20px);transform:translateX(-50%);
+  background:var(--ink);color:var(--bg);padding:6px 16px;border-radius:999px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:calc(100% - 32px)}
+.toast.show{opacity:1}
+.err{color:var(--rec)}
+.notice{background:var(--accent-soft);border-radius:12px;padding:10px 14px;font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <div class="logo">MCK</div>
+      <div><h1>အသံမှ စာသို့</h1><small>မြန်မာစကား Speech to Text</small></div>
+    </div>
+    <button class="icon-btn" id="openSettings" type="button">⚙ Settings</button>
+  </header>
+
+  <div class="notice" id="keyNotice" hidden>စတင်အသုံးပြုရန် <b>Settings</b> ထဲမှာ Gemini API key ထည့်ပါ။</div>
+
+  <section class="panel recorder">
+    <div class="timer" id="timer">00:00</div>
+    <canvas id="wave" width="640" height="88"></canvas>
+    <button class="rec-btn" id="recBtn" type="button" aria-label="အသံဖမ်းရန်"><span class="dot"></span></button>
+    <div class="status" id="status">ခလုတ်နှိပ်ပြီး ပြောပါ</div>
+    <div class="row">
+      <label class="upload" for="fileIn">⤒ အသံဖိုင် ရွေးမည်</label>
+      <input type="file" id="fileIn" accept="audio/*,video/*" hidden>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
+      <span class="label">ထွက်လာမည့်ပုံစံ</span>
+      <div class="chip-group" id="modes">
+        <button class="chip" type="button" data-mode="clean" aria-pressed="true">စာသား</button>
+        <button class="chip" type="button" data-mode="verbatim" aria-pressed="false">ပြောသည့်အတိုင်း</button>
+        <button class="chip" type="button" data-mode="summary" aria-pressed="false">အနှစ်ချုပ်</button>
+        <button class="chip" type="button" data-mode="todo" aria-pressed="false">To-Do</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel" id="resultPanel" hidden>
+    <div class="hist-head" style="margin-bottom:8px"><h2>ရလဒ်</h2><span class="label" id="resultMeta"></span></div>
+    <textarea id="result" aria-label="ရလဒ်စာသား"></textarea>
+    <div class="actions" style="margin-top:10px">
+      <button class="btn primary" id="copyBtn" type="button">Copy</button>
+      <button class="btn" id="shareBtn" type="button">Share</button>
+      <button class="btn" id="redoBtn" type="button">ပြန်ပြောင်းမည်</button>
+    </div>
+  </section>
+
+  <section>
+    <div class="hist-head"><h2>History</h2><button class="icon-btn" id="clearHist" type="button">အားလုံးဖျက်</button></div>
+    <div class="hist" id="hist" style="margin-top:10px"></div>
+  </section>
+</div>
+
+<dialog id="settings">
+  <form method="dialog" id="settingsForm">
+    <h2 style="margin:0 0 12px;font-size:17px">Settings</h2>
+    <div class="field">
+      <label for="apiKey" class="label">Gemini API key</label>
+      <input id="apiKey" type="password" autocomplete="off" placeholder="AIza...">
+      <span class="hint">Google AI Studio မှာ အခမဲ့ ယူနိုင်ပါတယ် — <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>။ Key ကို ဒီဖုန်းထဲမှာပဲ သိမ်းပါတယ်။</span>
+    </div>
+    <div class="field">
+      <label for="model" class="label">Model</label>
+      <select id="model"></select>
+      <span class="hint" id="modelHint">Key ထည့်ပြီး "Model စာရင်းယူ" နှိပ်ပါ။</span>
+    </div>
+    <div class="field">
+      <label for="vocab" class="label">အထူးစကားလုံးများ (ရွေးချယ်နိုင်)</label>
+      <input id="vocab" type="text" placeholder="ဥပမာ - MCK Education Center, ကိုဖြိုးမင်းဇော်">
+      <span class="hint">နာမည်၊ နေရာ၊ ဘာသာရပ်အသုံးအနှုန်းတွေ ထည့်ထားရင် ပိုမှန်ပါတယ်။</span>
+    </div>
+    <div class="actions">
+      <button class="btn" id="loadModels" type="button">Model စာရင်းယူ</button>
+      <button class="btn primary" id="saveSettings" type="submit">သိမ်းမည်</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+const API = 'https://generativelanguage.googleapis.com/v1beta';
+const CHUNK_SEC = 300;          // split long audio into 5-minute pieces
+const TARGET_RATE = 16000;
+
+// ---------- storage ----------
+const store = {
+  get(k, d){ try{ const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); }catch(e){ return d; } },
+  set(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
+};
+let cfg = store.get('mck.cfg', { key:'', model:'gemini-3.8-flash', vocab:'', models:[] });
+let history = store.get('mck.hist', []);
+let mode = store.get('mck.mode', 'clean');
+let lastAudio = null; // {blob, name}
+
+// ---------- ui helpers ----------
+function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove('show'),2200); }
+function setStatus(html, isErr){ const s=$('status'); s.innerHTML=html; s.classList.toggle('err', !!isErr); }
+function fmt(sec){ sec=Math.max(0,Math.floor(sec)); return String(Math.floor(sec/60)).padStart(2,'0')+':'+String(sec%60).padStart(2,'0'); }
+function refreshNotice(){ $('keyNotice').hidden = !!cfg.key; }
+async function copyText(text){
+  try{ await navigator.clipboard.writeText(text); toast('Copy ကူးပြီးပါပြီ'); }
+  catch(e){ const ta=$('result'); ta.value=text; ta.focus(); ta.select(); toast('စာကို ရွေးထားပါတယ် — Copy နှိပ်ပါ'); }
+}
+async function shareText(text){
+  if(navigator.share){ try{ await navigator.share({text}); return; }catch(e){ if(e.name==='AbortError') return; } }
+  copyText(text);
+}
+
+// ---------- modes ----------
+const MODE_LABEL = { clean:'စာသား', verbatim:'ပြောသည့်အတိုင်း', summary:'အနှစ်ချုပ်', todo:'To-Do' };
+function renderModes(){ document.querySelectorAll('#modes .chip').forEach(b=>b.setAttribute('aria-pressed', String(b.dataset.mode===mode))); }
+$('modes').addEventListener('click', e=>{ const b=e.target.closest('.chip'); if(!b) return; mode=b.dataset.mode; store.set('mck.mode',mode); renderModes(); });
+
+function transcribePrompt(){
+  const vocab = cfg.vocab ? `\nဤအသံထဲတွင် ပါနိုင်သော အထူးစကားလုံးများ: ${cfg.vocab}` : '';
+  if(mode==='verbatim') return `You are a professional Burmese (Myanmar) transcriber. Transcribe this audio word for word exactly as spoken, in Myanmar Unicode script. Keep filler words and repetitions. Words spoken in English stay in English. Output only the transcript, no commentary.${vocab}`;
+  return `You are a professional Burmese (Myanmar) transcriber. Transcribe this audio accurately into Myanmar Unicode script (not Zawgyi). Use correct Burmese spelling, add proper punctuation (၊ and ။), and break into paragraphs where the topic changes. Remove filler sounds like "အဲ", "အင်း" but do not change the meaning or summarize. Words spoken in English stay in English. If there are several speakers, start each turn on a new line. Output only the transcript, no commentary.${vocab}`;
+}
+function postPrompt(text){
+  if(mode==='summary') return `အောက်ပါ မြန်မာစာ transcript ကို မြန်မာလို အနှစ်ချုပ်ပါ။ ပထမ စာကြောင်း ၁-၂ ကြောင်းဖြင့် အဓိကအကြောင်းအရာ၊ ထို့နောက် အချက်အလက် အဓိကများကို "• " ဖြင့် စာရင်းပြုပါ။ Markdown သင်္ကေတ (** #) မသုံးပါနှင့်။ အနှစ်ချုပ်သာ ထုတ်ပေးပါ။\n\n${text}`;
+  if(mode==='todo') return `အောက်ပါ မြန်မာစာ transcript ထဲမှ လုပ်ရန်ကိစ္စများကို To-Do စာရင်းအဖြစ် မြန်မာလို ထုတ်ပေးပါ။ တစ်ကြောင်းလျှင် တစ်ခု၊ "☐ " ဖြင့် စပါ။ ရက်စွဲ/အချိန်/လူအမည် ပါလျှင် ထည့်ပါ။ Markdown သင်္ကေတ မသုံးပါနှင့်။ စာရင်းသာ ထုတ်ပေးပါ။\n\n${text}`;
+  return null;
+}
+
+// ---------- Gemini calls ----------
+function extractText(json){
+  const parts = json?.candidates?.[0]?.content?.parts || [];
+  const t = parts.filter(p=>p.text && !p.thought).map(p=>p.text).join('').trim();
+  if(!t){
+    const reason = json?.promptFeedback?.blockReason || json?.candidates?.[0]?.finishReason || 'စာမထွက်ပါ';
+    throw new Error('ရလဒ် မရပါ ('+reason+')');
+  }
+  return t;
+}
+async function gemini(parts){
+  const res = await fetch(`${API}/models/${encodeURIComponent(cfg.model)}:generateContent`, {
+    method:'POST',
+    headers:{'Content-Type':'application/json','x-goog-api-key':cfg.key},
+    body: JSON.stringify({ contents:[{ role:'user', parts }], generationConfig:{ temperature:0.2 } })
+  });
+  const json = await res.json().catch(()=>({}));
+  if(!res.ok){
+    const msg = json?.error?.message || res.statusText;
+    if(res.status===400 && /API key/i.test(msg)) throw new Error('API key မှားနေပါတယ်။ Settings မှာ စစ်ပါ။');
+    if(res.status===404) throw new Error(`Model "${cfg.model}" မရှိပါ။ Settings မှာ "Model စာရင်းယူ" နှိပ်ပြီး ပြန်ရွေးပါ။`);
+    if(res.status===429) throw new Error('အသုံးပြုမှု ကန့်သတ်ချက် ပြည့်သွားပါပြီ။ ခဏနေမှ ပြန်စမ်းပါ။');
+    throw new Error(`${res.status}: ${msg}`);
+  }
+  return extractText(json);
+}
+function b64(buf){
+  const bytes = new Uint8Array(buf); let s=''; const step=0x8000;
+  for(let i=0;i<bytes.length;i+=step) s+=String.fromCharCode.apply(null, bytes.subarray(i,i+step));
+  return btoa(s);
+}
+
+// ---------- audio → 16 kHz mono WAV chunks ----------
+async function toWavChunks(blob){
+  const AC = window.AudioContext || window.webkitAudioContext;
+  const ctx = new AC();
+  let decoded;
+  try{ decoded = await ctx.decodeAudioData(await blob.arrayBuffer()); }
+  finally{ ctx.close && ctx.close(); }
+  const len = Math.ceil(decoded.duration * TARGET_RATE);
+  const off = new OfflineAudioContext(1, len, TARGET_RATE);
+  const src = off.createBufferSource(); src.buffer = decoded; src.connect(off.destination); src.start();
+  const rendered = await off.startRendering();
+  const data = rendered.getChannelData(0);
+  const per = CHUNK_SEC * TARGET_RATE, chunks=[];
+  for(let i=0;i<data.length;i+=per) chunks.push(encodeWav(data.subarray(i, Math.min(i+per, data.length)), TARGET_RATE));
+  return { chunks, duration: decoded.duration };
+}
+function encodeWav(samples, rate){
+  const buf = new ArrayBuffer(44 + samples.length*2), v = new DataView(buf);
+  const w = (o,s)=>{ for(let i=0;i<s.length;i++) v.setUint8(o+i, s.charCodeAt(i)); };
+  w(0,'RIFF'); v.setUint32(4,36+samples.length*2,true); w(8,'WAVE'); w(12,'fmt ');
+  v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true); v.setUint32(24,rate,true);
+  v.setUint32(28,rate*2,true); v.setUint16(32,2,true); v.setUint16(34,16,true); w(36,'data'); v.setUint32(40,samples.length*2,true);
+  for(let i=0,o=44;i<samples.length;i++,o+=2){ const s=Math.max(-1,Math.min(1,samples[i])); v.setInt16(o, s<0?s*0x8000:s*0x7FFF, true); }
+  return buf;
+}
+
+// ---------- main pipeline ----------
+let busy=false;
+async function process(blob, name){
+  if(!cfg.key){ openSettings(); toast('API key အရင်ထည့်ပါ'); return; }
+  if(busy) return; busy=true; $('recBtn').disabled=true;
+  lastAudio = { blob, name };
+  try{
+    setStatus('<span class="spinner"></span> အသံကို ပြင်ဆင်နေပါတယ်…');
+    const { chunks, duration } = await toWavChunks(blob);
+    const pieces=[];
+    for(let i=0;i<chunks.length;i++){
+      setStatus(`<span class="spinner"></span> မြန်မာစာ ပြောင်းနေပါတယ်… ${chunks.length>1?`(${i+1}/${chunks.length})`:''}`);
+      pieces.push(await gemini([{ text: transcribePrompt() }, { inline_data:{ mime_type:'audio/wav', data: b64(chunks[i]) } }]));
+    }
+    let text = pieces.join('\n\n');
+    const p = postPrompt(text);
+    if(p){ setStatus('<span class="spinner"></span> '+MODE_LABEL[mode]+' ပြုလုပ်နေပါတယ်…'); text = await gemini([{ text:p }]); }
+    showResult(text, duration);
+    addHistory(text, duration);
+    setStatus('ပြီးပါပြီ ✓');
+  }catch(e){
+    console.error(e);
+    const msg = e.name==='EncodingError' || /decode/i.test(e.message) ? 'ဒီအသံဖိုင်ကို ဖတ်မရပါ။ mp3 / m4a / wav ဖိုင်နဲ့ စမ်းပါ။' : (e.message==='Failed to fetch' ? 'အင်တာနက် ချိတ်ဆက်မှု မရပါ။' : e.message);
+    setStatus(msg, true);
+  }finally{ busy=false; $('recBtn').disabled=false; }
+}
+function showResult(text, duration){
+  $('resultPanel').hidden=false; $('result').value=text;
+  $('resultMeta').textContent = `${MODE_LABEL[mode]} · ${fmt(duration)}`;
+}
+$('copyBtn').onclick = ()=>copyText($('result').value);
+$('shareBtn').onclick = ()=>shareText($('result').value);
+$('redoBtn').onclick = ()=>{ if(lastAudio) process(lastAudio.blob, lastAudio.name); else toast('ပြန်ပြောင်းစရာ အသံမရှိပါ'); };
+
+// ---------- recording ----------
+let rec=null, stream=null, chunksRec=[], t0=0, tick=null, analyser=null, raf=null, actx=null;
+async function startRec(){
+  if(!navigator.mediaDevices?.getUserMedia){ setStatus('ဒီ browser မှာ အသံဖမ်းလို့ မရပါ။ "အသံဖိုင် ရွေးမည်" ကို သုံးပါ။', true); return; }
+  try{ stream = await navigator.mediaDevices.getUserMedia({ audio:{ echoCancellation:true, noiseSuppression:true } }); }
+  catch(e){ setStatus('Microphone ခွင့်ပြုချက် မရပါ။ Browser settings မှာ ခွင့်ပြုပါ (သို့) "အသံဖိုင် ရွေးမည်" ကို သုံးပါ။', true); return; }
+  const types=['audio/webm;codecs=opus','audio/mp4','audio/webm','audio/ogg'];
+  const mt = types.find(t=>window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t));
+  rec = new MediaRecorder(stream, mt?{mimeType:mt}:undefined); chunksRec=[];
+  rec.ondataavailable = e=>{ if(e.data.size) chunksRec.push(e.data); };
+  rec.onstop = ()=>{
+    stream.getTracks().forEach(t=>t.stop()); stopWave();
+    const blob = new Blob(chunksRec, { type: rec.mimeType || 'audio/webm' });
+    if(Date.now()-t0 < 800){ setStatus('အသံတိုလွန်းပါတယ်။ ထပ်ပြောပါ။', true); return; }
+    process(blob, 'recording');
+  };
+  rec.start(1000); t0=Date.now();
+  $('recBtn').classList.add('on'); $('recBtn').setAttribute('aria-label','ရပ်ရန်');
+  setStatus('<span style="color:var(--rec)">●</span> အသံဖမ်းနေပါတယ် — ပြီးရင် ထပ်နှိပ်ပါ');
+  tick=setInterval(()=>$('timer').textContent=fmt((Date.now()-t0)/1000), 250);
+  startWave(stream);
+  try{ navigator.wakeLock && (startRec.lock = await navigator.wakeLock.request('screen')); }catch(e){}
+}
+function stopRec(){
+  clearInterval(tick); $('recBtn').classList.remove('on'); $('recBtn').setAttribute('aria-label','အသံဖမ်းရန်');
+  try{ startRec.lock && startRec.lock.release(); }catch(e){}
+  if(rec && rec.state!=='inactive') rec.stop();
+}
+$('recBtn').onclick = ()=>{ if(rec && rec.state==='recording') stopRec(); else { $('timer').textContent='00:00'; startRec(); } };
+
+function startWave(s){
+  try{
+    const AC = window.AudioContext || window.webkitAudioContext; actx = new AC();
+    analyser = actx.createAnalyser(); analyser.fftSize=256; actx.createMediaStreamSource(s).connect(analyser);
+    const cv=$('wave'), g=cv.getContext('2d'), buf=new Uint8Array(analyser.frequencyBinCount);
+    const col = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()||'#1F6B55';
+    const draw=()=>{ analyser.getByteFrequencyData(buf); g.clearRect(0,0,cv.width,cv.height); g.fillStyle=col;
+      const bars=40, bw=cv.width/bars;
+      for(let i=0;i<bars;i++){ const v=buf[Math.floor(i*buf.length/bars/1.6)]/255; const h=Math.max(4, v*cv.height);
+        g.fillRect(i*bw+3,(cv.height-h)/2,bw-6,h); }
+      raf=requestAnimationFrame(draw); };
+    draw();
+  }catch(e){}
+}
+function stopWave(){ cancelAnimationFrame(raf); try{ actx && actx.close(); }catch(e){} idleWave(); }
+function idleWave(){ const cv=$('wave'), g=cv.getContext('2d'); g.clearRect(0,0,cv.width,cv.height);
+  g.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--line').trim()||'#ccc';
+  const bars=40,bw=cv.width/bars; for(let i=0;i<bars;i++) g.fillRect(i*bw+3,cv.height/2-2,bw-6,4); }
+idleWave();
+
+$('fileIn').onchange = e=>{ const f=e.target.files[0]; if(f){ $('timer').textContent='--:--'; process(f, f.name); } e.target.value=''; };
+
+// ---------- history ----------
+function addHistory(text, duration){
+  history.unshift({ id:Date.now(), at:new Date().toISOString(), mode, duration, text });
+  history = history.slice(0,200); store.set('mck.hist', history); renderHistory();
+}
+function renderHistory(){
+  const el=$('hist'); el.innerHTML='';
+  if(!history.length){ el.innerHTML='<div class="empty">မှတ်တမ်း မရှိသေးပါ</div>'; return; }
+  for(const h of history){
+    const d=new Date(h.at);
+    const item=document.createElement('div'); item.className='item';
+    item.innerHTML=`<div class="item-meta"><span>${d.toLocaleDateString('en-GB')} ${d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})} · ${fmt(h.duration||0)}</span><span class="tag">${MODE_LABEL[h.mode]||''}</span></div><div class="item-text"></div><div class="actions"><button class="btn" data-a="copy" type="button">Copy</button><button class="btn" data-a="share" type="button">Share</button><button class="btn" data-a="more" type="button">အပြည့်ကြည့်</button><button class="btn" data-a="del" type="button">ဖျက်</button></div>`;
+    item.querySelector('.item-text').textContent=h.text;
+    item.addEventListener('click', e=>{
+      const a=e.target.closest('button')?.dataset.a; if(!a) return;
+      if(a==='copy') copyText(h.text);
+      if(a==='share') shareText(h.text);
+      if(a==='more'){ item.classList.toggle('open'); e.target.textContent=item.classList.contains('open')?'ချုံ့မည်':'အပြည့်ကြည့်'; }
+      if(a==='del'){ if(e.target.dataset.confirm){ history=history.filter(x=>x.id!==h.id); store.set('mck.hist',history); renderHistory(); }
+                     else { e.target.dataset.confirm='1'; e.target.textContent='သေချာလား?'; e.target.classList.add('primary'); } }
+    });
+    el.appendChild(item);
+  }
+}
+$('clearHist').onclick = e=>{
+  const b=e.currentTarget;
+  if(b.dataset.confirm){ history=[]; store.set('mck.hist',history); renderHistory(); delete b.dataset.confirm; b.textContent='အားလုံးဖျက်'; }
+  else { b.dataset.confirm='1'; b.textContent='သေချာလား? ထပ်နှိပ်ပါ'; setTimeout(()=>{ delete b.dataset.confirm; b.textContent='အားလုံးဖျက်'; },3000); }
+};
+
+// ---------- settings ----------
+function fillModels(list){
+  const sel=$('model'); sel.innerHTML='';
+  const all = Array.from(new Set([cfg.model, ...list].filter(Boolean)));
+  for(const m of all){ const o=document.createElement('option'); o.value=m; o.textContent=m; sel.appendChild(o); }
+  sel.value=cfg.model;
+}
+function openSettings(){ $('apiKey').value=cfg.key; $('vocab').value=cfg.vocab||''; fillModels(cfg.models||[]); $('settings').showModal(); }
+$('openSettings').onclick = openSettings;
+$('loadModels').onclick = async ()=>{
+  const key=$('apiKey').value.trim(); if(!key){ $('modelHint').textContent='API key အရင်ထည့်ပါ။'; return; }
+  $('modelHint').innerHTML='<span class="spinner"></span> ယူနေပါတယ်…';
+  try{
+    const res=await fetch(`${API}/models?pageSize=200`,{headers:{'x-goog-api-key':key}}); const j=await res.json();
+    if(!res.ok) throw new Error(j?.error?.message||res.statusText);
+    const names=(j.models||[]).filter(m=>(m.supportedGenerationMethods||[]).includes('generateContent'))
+      .map(m=>m.name.replace('models/','')).filter(n=>/gemini/.test(n) && !/(tts|image|embed|live|omni|robotics|computer)/.test(n));
+    names.sort((a,b)=>{ const s=n=>(/flash/.test(n)?0:1)+(/lite/.test(n)?0.5:0)+(/preview|exp/.test(n)?0.3:0); return s(a)-s(b) || b.localeCompare(a,undefined,{numeric:true}); });
+    cfg.models=names;
+    if(!names.includes(cfg.model) && names.length) cfg.model=names[0];
+    fillModels(names);
+    $('modelHint').textContent=`Model ${names.length} ခု တွေ့ပါတယ်။ "flash" ပါတာက မြန်ပြီး ဈေးသက်သာပါတယ်။`;
+  }catch(e){ $('modelHint').innerHTML='<span class="err">'+(e.message==='Failed to fetch'?'အင်တာနက် မရပါ':e.message)+'</span>'; }
+};
+$('settingsForm').addEventListener('submit', ()=>{
+  cfg.key=$('apiKey').value.trim(); cfg.model=$('model').value||cfg.model; cfg.vocab=$('vocab').value.trim();
+  store.set('mck.cfg',cfg); refreshNotice(); toast('သိမ်းပြီးပါပြီ');
+});
+
+renderModes(); renderHistory(); refreshNotice();
+if(!cfg.key) setTimeout(openSettings, 400);
+})();
+</script>
+</body>
+</html>
