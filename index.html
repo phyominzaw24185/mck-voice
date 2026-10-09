@@ -28,6 +28,7 @@
   color-scheme:dark;
 }
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html,body{margin:0}
 body{
   background:var(--bg); color:var(--ink);
@@ -100,6 +101,32 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 .toast.show{opacity:1}
 .err{color:var(--rec)}
 .notice{background:var(--accent-soft);border-radius:12px;padding:10px 14px;font-size:13px}
+
+/* tabs */
+.tabs{display:grid;grid-template-columns:1fr 1fr;gap:4px;background:var(--line);border-radius:12px;padding:4px}
+.tab{border:0;background:transparent;border-radius:9px;padding:6px 8px;font-size:14px;color:var(--muted)}
+.tab[aria-selected="true"]{background:var(--surface);color:var(--ink);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+
+/* interpreter */
+.tr{display:flex;flex-direction:column;gap:14px}
+.tr-pick{display:grid;grid-template-columns:3fr 2fr;gap:10px}
+.tr-pick .field{margin:0}
+.tr-pick select{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);width:100%}
+.talk{display:flex;align-items:center;gap:14px;width:100%;text-align:left;border-radius:16px;padding:14px 16px;border:2px solid transparent;transition:transform .12s}
+.talk:active{transform:scale(.98)}
+.talk:disabled{opacity:.4;cursor:not-allowed}
+.talk .mic{flex:none;width:52px;height:52px;border-radius:50%;display:grid;place-items:center;font-size:22px;background:rgba(255,255,255,.18)}
+.talk .t1{display:block;font-size:17px;font-weight:600;line-height:1.5}
+.talk .t2{display:block;font-size:12px;opacity:.85;line-height:1.6;font-variant-numeric:tabular-nums}
+.talk.me{background:var(--accent);color:var(--surface)}
+.talk.them{background:var(--surface);color:var(--ink);border-color:var(--accent)}
+.talk.them .mic{background:var(--accent-soft);color:var(--accent)}
+.talk.on{background:var(--rec);border-color:var(--rec);color:#fff;animation:pulse 1.4s ease-in-out infinite}
+.talk.on .mic{background:rgba(255,255,255,.2);color:#fff}
+@media (prefers-reduced-motion:reduce){.talk.on{animation:none}}
+.tr-card{border-top:1px solid var(--line);padding-top:12px;display:flex;flex-direction:column;gap:4px}
+.tr-src{color:var(--muted);font-size:14px;white-space:pre-wrap}
+.tr-out{font-size:21px;line-height:1.75;font-weight:600;white-space:pre-wrap;word-break:break-word;margin-bottom:6px}
 </style>
 </head>
 <body>
@@ -114,6 +141,50 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 
   <div class="notice" id="keyNotice" hidden>စတင်အသုံးပြုရန် <b>Settings</b> ထဲမှာ Gemini API key ထည့်ပါ။</div>
 
+  <nav class="tabs" role="tablist">
+    <button class="tab" type="button" role="tab" id="tabBtnStt" data-tab="stt" aria-selected="true">အသံ → စာ</button>
+    <button class="tab" type="button" role="tab" id="tabBtnTr" data-tab="tr" aria-selected="false">စကားပြန် (အသံ ⇄ အသံ)</button>
+  </nav>
+
+  <section class="panel tr" id="tabTr" hidden>
+    <div class="tr-pick">
+      <div class="field">
+        <label for="trLang" class="label">ပြန်ဆိုမည့် ဘာသာ</label>
+        <select id="trLang"></select>
+      </div>
+      <div class="field">
+        <label for="trVoice" class="label">အသံ</label>
+        <select id="trVoice">
+          <option value="Kore">အမျိုးသမီး</option>
+          <option value="Aoede">အမျိုးသမီး ၂</option>
+          <option value="Puck">အမျိုးသား</option>
+          <option value="Charon">အမျိုးသား ၂</option>
+        </select>
+      </div>
+    </div>
+    <button class="talk me" id="talkMe" type="button" data-dir="me">
+      <span class="mic">🎙</span>
+      <span><span class="t1" id="talkMeT1">မြန်မာ → English</span><span class="t2" id="talkMeT2">ကျွန်တော် ပြောမယ် · နှိပ်ပြီး ပြောပါ</span></span>
+    </button>
+    <button class="talk them" id="talkThem" type="button" data-dir="them">
+      <span class="mic">🎙</span>
+      <span><span class="t1" id="talkThemT1">English → မြန်မာ</span><span class="t2" id="talkThemT2">တစ်ဖက်လူ ပြောမယ် · နှိပ်ပြီး ပြောပါ</span></span>
+    </button>
+    <div class="status" id="tStatus">ခလုတ်ကိုနှိပ်ပြီး ပြောပါ။ ပြောပြီးရင် ထပ်နှိပ်ပါ။ ဘာသာပြန်ပြီး အသံထွက် ဖတ်ပေးပါမယ်။</div>
+    <div class="tr-card" id="trResult" hidden>
+      <span class="label">ပြောခဲ့သည်</span>
+      <div class="tr-src" id="trSrc"></div>
+      <span class="label" id="trOutLabel" style="margin-top:6px"></span>
+      <div class="tr-out" id="trOut"></div>
+      <div class="actions">
+        <button class="btn primary" id="trPlay" type="button">▶ ပြန်ဖွင့်</button>
+        <button class="btn" id="trCopy" type="button">Copy</button>
+        <button class="btn" id="trShare" type="button">Share</button>
+      </div>
+    </div>
+  </section>
+
+  <div id="tabStt" style="display:contents">
   <section class="panel recorder">
     <div class="timer" id="timer">00:00</div>
     <canvas id="wave" width="640" height="88"></canvas>
@@ -152,6 +223,7 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
       <button class="btn" id="redoBtn" type="button">ပြန်ပြောင်းမည်</button>
     </div>
   </section>
+  </div>
 
   <section>
     <div class="hist-head"><h2>History</h2><button class="icon-btn" id="clearHist" type="button">အားလုံးဖျက်</button></div>
@@ -171,6 +243,11 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
       <label for="model" class="label">Model</label>
       <select id="model"></select>
       <span class="hint" id="modelHint">Key ထည့်ပြီး "Model စာရင်းယူ" နှိပ်ပါ။</span>
+    </div>
+    <div class="field">
+      <label for="ttsModel" class="label">အသံထုတ် Model (စကားပြန်အတွက်)</label>
+      <select id="ttsModel"></select>
+      <span class="hint">မြန်မာ၊ ထိုင်း အသံထွက်ဖို့ "lite" မပါတဲ့ model ကို ရွေးပါ။</span>
     </div>
     <div class="field">
       <label for="vocab" class="label">အထူးစကားလုံးများ (ရွေးချယ်နိုင်)</label>
@@ -205,7 +282,8 @@ let lastAudio = null; // {blob, name}
 
 // ---------- ui helpers ----------
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove('show'),2200); }
-function setStatus(html, isErr){ const s=$('status'); s.innerHTML=html; s.classList.toggle('err', !!isErr); }
+let statusTarget='status';
+function setStatus(html, isErr){ const s=$(statusTarget); s.innerHTML=html; s.classList.toggle('err', !!isErr); }
 function fmt(sec){ sec=Math.max(0,Math.floor(sec)); return String(Math.floor(sec/60)).padStart(2,'0')+':'+String(sec%60).padStart(2,'0'); }
 function refreshNotice(){ $('keyNotice').hidden = !!cfg.key; }
 async function copyText(text){
@@ -271,11 +349,11 @@ function fallbackModels(){
   return [cfg.model, ...flash.slice(0,3)];
 }
 // Retries busy/overloaded errors, then moves on to the next model.
-async function gemini(parts){
+async function gemini(parts, gen){
   const models = fallbackModels(); let lastErr;
   for(let mi=0; mi<models.length; mi++){
     for(let attempt=0; attempt<2; attempt++){
-      try{ return await geminiOnce(parts, models[mi]); }
+      try{ return await geminiOnce(parts, models[mi], gen); }
       catch(e){
         lastErr = e;
         if(!e.retryable) throw e;
@@ -287,24 +365,26 @@ async function gemini(parts){
   }
   throw lastErr;
 }
-async function geminiOnce(parts, model){
+async function geminiOnce(parts, model, gen){
   const res = await fetch(`${API}/models/${encodeURIComponent(model)}:generateContent`, {
     method:'POST',
     headers:{'Content-Type':'application/json','x-goog-api-key':cfg.key},
-    body: JSON.stringify({ contents:[{ role:'user', parts }], generationConfig:{ temperature:0.2 } })
+    body: JSON.stringify({ contents:[{ role:'user', parts }], generationConfig:{ temperature:0.2, ...(gen||{}) } })
   });
   const json = await res.json().catch(()=>({}));
-  if(!res.ok){
-    const msg = json?.error?.message || res.statusText;
-    if(res.status===400 && /API key/i.test(msg)) throw new Error('API key မှားနေပါတယ်။ Settings မှာ စစ်ပါ။');
-    let err;
-    if(res.status===404){ err = new Error(`Model "${model}" မရှိပါ။ Settings မှာ "Model စာရင်းယူ" နှိပ်ပြီး ပြန်ရွေးပါ။`); err.retryable = model!==cfg.model; }
-    else if(res.status===429){ err = new Error('အသုံးပြုမှု ကန့်သတ်ချက် ပြည့်သွားပါပြီ။ ခဏနေမှ ပြန်စမ်းပါ။'); err.retryable = true; }
-    else if(res.status>=500){ err = new Error('Google ဘက်က Model တွေ အလုပ်များနေပါတယ်။ ခဏနေမှ "ပြန်စမ်းမည်" ကို နှိပ်ပါ။'); err.retryable = true; }
-    else err = new Error(`${res.status}: ${msg}`);
-    throw err;
-  }
+  if(!res.ok) throw apiError(res, json, model);
   return extractText(json);
+}
+function apiError(res, json, model){
+  const msg = json?.error?.message || res.statusText;
+  let err;
+  if(res.status===400 && /API key/i.test(msg)) return new Error('API key မှားနေပါတယ်။ Settings မှာ စစ်ပါ။');
+  if(res.status===404){ err = new Error(`Model "${model}" မရှိပါ။ Settings မှာ "Model စာရင်းယူ" နှိပ်ပြီး ပြန်ရွေးပါ။`); err.retryable = model!==cfg.model; }
+  else if(res.status===429){ err = new Error('အသုံးပြုမှု ကန့်သတ်ချက် ပြည့်သွားပါပြီ။ ခဏနေမှ ပြန်စမ်းပါ။'); err.retryable = true; }
+  else if(res.status>=500){ err = new Error('Google ဘက်က Model တွေ အလုပ်များနေပါတယ်။ ခဏနေမှ "ပြန်စမ်းမည်" ကို နှိပ်ပါ။'); err.retryable = true; }
+  else err = new Error(`${res.status}: ${msg}`);
+  err.status = res.status; err.raw = msg;
+  return err;
 }
 function b64(buf){
   const bytes = new Uint8Array(buf); let s=''; const step=0x8000;
@@ -342,7 +422,7 @@ function encodeWav(samples, rate){
 let busy=false;
 async function process(blob, name){
   if(!cfg.key){ openSettings(); toast('API key အရင်ထည့်ပါ'); return; }
-  if(busy) return; busy=true; $('recBtn').disabled=true;
+  if(busy) return; busy=true; $('recBtn').disabled=true; statusTarget='status';
   lastAudio = { blob, name };
   try{
     setStatus('<span class="spinner"></span> အသံကို ပြင်ဆင်နေပါတယ်…');
@@ -378,6 +458,7 @@ $('redoBtn').onclick = ()=>{ if(lastAudio) process(lastAudio.blob, lastAudio.nam
 // ---------- recording ----------
 let rec=null, stream=null, chunksRec=[], t0=0, tick=null, analyser=null, raf=null, actx=null;
 async function startRec(){
+  statusTarget='status';
   if(!navigator.mediaDevices?.getUserMedia){ setStatus('ဒီ browser မှာ အသံဖမ်းလို့ မရပါ။ "အသံဖိုင် ရွေးမည်" ကို သုံးပါ။', true); return; }
   try{ stream = await navigator.mediaDevices.getUserMedia({ audio:{ echoCancellation:true, noiseSuppression:true } }); }
   catch(e){ setStatus('Microphone ခွင့်ပြုချက် မရပါ။ Browser settings မှာ ခွင့်ပြုပါ (သို့) "အသံဖိုင် ရွေးမည်" ကို သုံးပါ။', true); return; }
@@ -428,8 +509,8 @@ idleWave();
 $('fileIn').onchange = e=>{ const f=e.target.files[0]; if(f){ $('timer').textContent='--:--'; process(f, f.name); } e.target.value=''; };
 
 // ---------- history ----------
-function addHistory(text, duration){
-  history.unshift({ id:Date.now(), at:new Date().toISOString(), mode, lang, duration, text });
+function addHistory(text, duration, extra){
+  history.unshift({ id:Date.now(), at:new Date().toISOString(), mode, lang, duration, text, ...(extra||{}) });
   history = history.slice(0,200); store.set('mck.hist', history); renderHistory();
 }
 function renderHistory(){
@@ -438,7 +519,7 @@ function renderHistory(){
   for(const h of history){
     const d=new Date(h.at);
     const item=document.createElement('div'); item.className='item';
-    item.innerHTML=`<div class="item-meta"><span>${d.toLocaleDateString('en-GB')} ${d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})} · ${fmt(h.duration||0)}</span><span class="tag">${MODE_LABEL[h.mode]||''}${h.lang && h.lang!=='mix' ? ' · '+LANG_LABEL[h.lang] : ''}</span></div><div class="item-text"></div><div class="actions"><button class="btn" data-a="copy" type="button">Copy</button><button class="btn" data-a="share" type="button">Share</button><button class="btn" data-a="more" type="button">အပြည့်ကြည့်</button><button class="btn" data-a="del" type="button">ဖျက်</button></div>`;
+    item.innerHTML=`<div class="item-meta"><span>${d.toLocaleDateString('en-GB')} ${d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})} · ${fmt(h.duration||0)}</span><span class="tag">${h.tag || ((MODE_LABEL[h.mode]||'') + (h.lang && h.lang!=='mix' ? ' · '+LANG_LABEL[h.lang] : ''))}</span></div><div class="item-text"></div><div class="actions"><button class="btn" data-a="copy" type="button">Copy</button><button class="btn" data-a="share" type="button">Share</button><button class="btn" data-a="more" type="button">အပြည့်ကြည့်</button><button class="btn" data-a="del" type="button">ဖျက်</button></div>`;
     item.querySelector('.item-text').textContent=h.text;
     item.addEventListener('click', e=>{
       const a=e.target.closest('button')?.dataset.a; if(!a) return;
@@ -457,12 +538,224 @@ $('clearHist').onclick = e=>{
   else { b.dataset.confirm='1'; b.textContent='သေချာလား? ထပ်နှိပ်ပါ'; setTimeout(()=>{ delete b.dataset.confirm; b.textContent='အားလုံးဖျက်'; },3000); }
 };
 
+// ---------- tabs ----------
+let tab = store.get('mck.tab', 'stt');
+function renderTab(){
+  $('tabBtnStt').setAttribute('aria-selected', String(tab==='stt'));
+  $('tabBtnTr').setAttribute('aria-selected', String(tab==='tr'));
+  $('tabStt').hidden = tab!=='stt'; $('tabTr').hidden = tab!=='tr';
+}
+document.querySelector('.tabs').addEventListener('click', e=>{
+  const b=e.target.closest('.tab'); if(!b) return;
+  if((rec && rec.state==='recording') || (tRec && tRec.state==='recording')) { toast('အသံဖမ်းနေတုန်းပါ။ အရင်ရပ်ပါ။'); return; }
+  tab=b.dataset.tab; store.set('mck.tab',tab); renderTab();
+});
+
+// ---------- interpreter (voice ⇄ voice) ----------
+const DEFAULT_TTS = 'gemini-3.8-flash-tts';
+const TR_LANGS = {
+  en:{ name:'English', my:'အင်္ဂလိပ်', label:'English', bcp:'en-US' },
+  zh:{ name:'Mandarin Chinese (Simplified Chinese characters)', my:'တရုတ်', label:'中文', bcp:'zh-CN' },
+  th:{ name:'Thai', my:'ထိုင်း', label:'ไทย', bcp:'th-TH' },
+  vi:{ name:'Vietnamese', my:'ဗီယက်နမ်', label:'Tiếng Việt', bcp:'vi-VN' },
+  ko:{ name:'Korean', my:'ကိုရီးယား', label:'한국어', bcp:'ko-KR' },
+  hi:{ name:'Hindi', my:'အိန္ဒိယ (ဟိန္ဒီ)', label:'हिन्दी', bcp:'hi-IN' },
+  ja:{ name:'Japanese', my:'ဂျပန်', label:'日本語', bcp:'ja-JP' },
+};
+const MY = { name:'Burmese (Myanmar Unicode script)', my:'မြန်မာ', label:'မြန်မာ', bcp:'my-MM' };
+let trLang = store.get('mck.trLang', 'en');
+let trVoice = store.get('mck.trVoice', 'Kore');
+let tRec=null, tStream=null, tChunks=[], tT0=0, tTick=null, tDir=null, tBusy=false, lastSpeech=null;
+
+(function initTr(){
+  const sel=$('trLang');
+  for(const [k,v] of Object.entries(TR_LANGS)){ const o=document.createElement('option'); o.value=k; o.textContent=`${v.my} — ${v.label}`; sel.appendChild(o); }
+  sel.value=trLang; $('trVoice').value=trVoice;
+  sel.onchange=()=>{ trLang=sel.value; store.set('mck.trLang',trLang); renderTr(); };
+  $('trVoice').onchange=()=>{ trVoice=$('trVoice').value; store.set('mck.trVoice',trVoice); };
+})();
+function renderTr(){
+  const L=TR_LANGS[trLang];
+  $('talkMeT1').textContent = `မြန်မာ → ${L.label}`;
+  $('talkThemT1').textContent = `${L.label} → မြန်မာ`;
+  if(!tRec || tRec.state!=='recording'){
+    $('talkMeT2').textContent = 'ကျွန်တော် ပြောမယ် · နှိပ်ပြီး ပြောပါ';
+    $('talkThemT2').textContent = `တစ်ဖက်လူ ပြောမယ် · ${L.my}လို ပြောပါ`;
+  }
+}
+
+// iOS only lets audio play after a tap, so unlock one player during the tap and reuse it.
+const player = new Audio(); let audioUnlocked=false;
+function unlockAudio(){
+  if(audioUnlocked) return; audioUnlocked=true;
+  try{
+    const silent = URL.createObjectURL(new Blob([encodeWav(new Float32Array(2400), 24000)], {type:'audio/wav'}));
+    player.src = silent; player.play().catch(()=>{});
+  }catch(e){}
+  try{ if(window.speechSynthesis){ const u=new SpeechSynthesisUtterance(' '); u.volume=0; speechSynthesis.speak(u); } }catch(e){}
+}
+
+async function tStart(dir){
+  if(!cfg.key){ openSettings(); toast('API key အရင်ထည့်ပါ'); return; }
+  if(!navigator.mediaDevices?.getUserMedia){ statusTarget='tStatus'; setStatus('ဒီ browser မှာ အသံဖမ်းလို့ မရပါ။', true); return; }
+  try{ tStream = await navigator.mediaDevices.getUserMedia({ audio:{ echoCancellation:true, noiseSuppression:true } }); }
+  catch(e){ statusTarget='tStatus'; setStatus('Microphone ခွင့်ပြုချက် မရပါ။ Browser settings မှာ ခွင့်ပြုပါ။', true); return; }
+  player.pause();
+  try{ window.speechSynthesis && speechSynthesis.cancel(); }catch(e){}
+  const types=['audio/webm;codecs=opus','audio/mp4','audio/webm','audio/ogg'];
+  const mt = types.find(t=>window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t));
+  tRec = new MediaRecorder(tStream, mt?{mimeType:mt}:undefined); tChunks=[]; tDir=dir;
+  tRec.ondataavailable = e=>{ if(e.data.size) tChunks.push(e.data); };
+  tRec.onstop = ()=>{
+    tStream.getTracks().forEach(t=>t.stop());
+    const blob = new Blob(tChunks, { type: tRec.mimeType || 'audio/webm' });
+    if(Date.now()-tT0 < 700){ statusTarget='tStatus'; setStatus('အသံတိုလွန်းပါတယ်။ ထပ်ပြောပါ။', true); renderTr(); return; }
+    interpret(blob, dir);
+  };
+  tRec.start(1000); tT0=Date.now();
+  const btn = dir==='me' ? $('talkMe') : $('talkThem'), other = dir==='me' ? $('talkThem') : $('talkMe');
+  const t2 = dir==='me' ? $('talkMeT2') : $('talkThemT2');
+  btn.classList.add('on'); other.disabled=true;
+  statusTarget='tStatus'; setStatus('<span style="color:var(--rec)">●</span> နားထောင်နေပါတယ် — ပြောပြီးရင် ထပ်နှိပ်ပါ');
+  tTick=setInterval(()=>{ t2.textContent = `● ${fmt((Date.now()-tT0)/1000)} · ရပ်ရန် ထပ်နှိပ်ပါ`; }, 250);
+}
+function tStop(){
+  clearInterval(tTick);
+  $('talkMe').classList.remove('on'); $('talkThem').classList.remove('on');
+  if(tRec && tRec.state!=='inactive') tRec.stop();
+}
+function onTalk(e){
+  unlockAudio();
+  const dir = e.currentTarget.dataset.dir;
+  if(tRec && tRec.state==='recording'){ if(dir===tDir) tStop(); return; }
+  if(tBusy) return;
+  tStart(dir);
+}
+$('talkMe').onclick = onTalk; $('talkThem').onclick = onTalk;
+
+async function interpret(blob, dir){
+  tBusy=true; statusTarget='tStatus';
+  $('talkMe').disabled=true; $('talkThem').disabled=true;
+  const L = TR_LANGS[trLang];
+  const src = dir==='me' ? MY : L, dst = dir==='me' ? L : MY;
+  try{
+    setStatus('<span class="spinner"></span> ဘာသာပြန်နေပါတယ်…');
+    const { chunks, duration } = await toWavChunks(blob);
+    const vocab = cfg.vocab ? ` Names/terms that may appear: ${cfg.vocab}.` : '';
+    const prompt = `You are a professional live interpreter. The audio is spoken mainly in ${src.name}; it may contain some English words.${vocab}
+1) Transcribe exactly what was said, in its original language and script (Burmese in Myanmar Unicode script, never Zawgyi).
+2) Translate it into ${dst.name} the way a human interpreter would say it out loud: natural, polite, spoken style, same meaning, nothing added or left out. Keep names and numbers.
+Return JSON only: {"source_text": "...", "translation": "..."}`;
+    const raw = await gemini([{ text: prompt }, { inline_data:{ mime_type:'audio/wav', data: b64(chunks[0]) } }], {
+      responseMimeType:'application/json',
+      responseSchema:{ type:'OBJECT', properties:{ source_text:{type:'STRING'}, translation:{type:'STRING'} }, required:['source_text','translation'] }
+    });
+    let out; try{ out = JSON.parse(raw); }catch(e){ out = { source_text:'', translation: raw }; }
+    const srcText=(out.source_text||'').trim(), trText=(out.translation||'').trim();
+    if(!trText) throw new Error('စကားသံ မကြားရပါ။ ဖုန်းကို နီးနီးကပ်ပြီး ထပ်ပြောကြည့်ပါ။');
+    $('trResult').hidden=false;
+    $('trSrc').textContent = srcText; $('trSrc').lang = src.bcp;
+    $('trOut').textContent = trText; $('trOut').lang = dst.bcp;
+    $('trOutLabel').textContent = `${dst.my} — ${dst.label}`;
+    addHistory(`${srcText}\n\n→ ${trText}`, duration, { mode:'voice', tag:`စကားပြန် · ${src.label} → ${dst.label}` });
+    lastSpeech = { text: trText, lang: dst, url: null };
+    if(chunks.length>1) toast('၅ မိနစ်ထက် ရှည်လို့ အစပိုင်း ၅ မိနစ်ကိုပဲ ပြန်ဆိုထားပါတယ်');
+    await speak(lastSpeech);
+  }catch(e){
+    console.error(e);
+    const msg = e.message==='Failed to fetch' ? 'အင်တာနက် ချိတ်ဆက်မှု မရပါ။' : e.message;
+    setStatus(msg + '<br><button class="btn primary" type="button" id="tRetry" style="margin-top:8px">ပြန်စမ်းမည် (အသံပြန်မဖမ်းရ)</button>', true);
+    const rb=$('tRetry'); if(rb) rb.onclick=()=>{ unlockAudio(); interpret(blob, dir); };
+  }finally{
+    tBusy=false; $('talkMe').disabled=false; $('talkThem').disabled=false; renderTr();
+  }
+}
+
+// Text → speech with Gemini TTS; falls back to the phone's own voice.
+async function speak(s){
+  statusTarget='tStatus';
+  try{
+    if(!s.url){
+      setStatus('<span class="spinner"></span> အသံထုတ်နေပါတယ်…');
+      s.url = URL.createObjectURL(await ttsAudio(s.text));
+    }
+    player.src = s.url;
+    await player.play();
+    setStatus('🔊 ဖတ်ပြနေပါတယ်');
+    player.onended = ()=>setStatus('ပြီးပါပြီ ✓ · နောက်တစ်ခွန်း ပြောနိုင်ပါပြီ');
+  }catch(e){
+    console.warn('TTS', e);
+    if(e && e.name==='NotAllowedError'){ setStatus('▶ ပြန်ဖွင့် ကို နှိပ်ပြီး နားထောင်ပါ'); return; }
+    if(browserSpeak(s)) setStatus('🔊 ဖုန်းအသံနဲ့ ဖတ်ပြနေပါတယ် (Gemini အသံ မရလို့)');
+    else setStatus('အသံ မထွက်နိုင်ပါ ('+(e.message||e)+')။ ဘာသာပြန်စာကို ဖတ်ပြပါ။', true);
+  }
+}
+function browserSpeak(s){
+  if(!window.speechSynthesis) return false;
+  const voices = speechSynthesis.getVoices();
+  const base = s.lang.bcp.split('-')[0];
+  const v = voices.find(v=>v.lang===s.lang.bcp) || voices.find(v=>v.lang && v.lang.toLowerCase().startsWith(base));
+  if(!v && voices.length) return false;
+  const u = new SpeechSynthesisUtterance(s.text); u.lang = s.lang.bcp; if(v) u.voice=v; u.rate=0.95;
+  speechSynthesis.cancel(); speechSynthesis.speak(u); return true;
+}
+async function ttsAudio(text){
+  const models = Array.from(new Set([cfg.ttsModel||DEFAULT_TTS, DEFAULT_TTS, 'gemini-3.1-flash-tts-preview']));
+  let lastErr;
+  for(const m of models){
+    for(const legacy of [false, true]){
+      try{ return await ttsOnce(text, m, legacy); }
+      catch(e){
+        lastErr=e;
+        if(e.status===400 && !legacy) continue;          // older request shape
+        if(e.retryable){ await sleep(1500); try{ return await ttsOnce(text, m, legacy); }catch(e2){ lastErr=e2; } }
+        break;
+      }
+    }
+  }
+  throw lastErr;
+}
+async function ttsOnce(text, model, legacy){
+  const voiceConfig = legacy ? { prebuiltVoiceConfig:{ voiceName: trVoice } } : { voice: trVoice };
+  const res = await fetch(`${API}/models/${encodeURIComponent(model)}:generateContent`, {
+    method:'POST', headers:{'Content-Type':'application/json','x-goog-api-key':cfg.key},
+    body: JSON.stringify({ contents:[{ role:'user', parts:[{ text }] }], generationConfig:{ responseModalities:['AUDIO'], speechConfig:{ voiceConfig } } })
+  });
+  const json = await res.json().catch(()=>({}));
+  if(!res.ok) throw apiError(res, json, model);
+  const part = (json?.candidates?.[0]?.content?.parts||[]).find(p=>p.inlineData||p.inline_data);
+  const data = part && (part.inlineData||part.inline_data);
+  if(!data?.data) throw new Error('အသံ မရပါ');
+  const bin = atob(data.data), bytes = new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+  if(bin.slice(0,4)==='RIFF') return new Blob([bytes], {type:'audio/wav'});
+  const mime = data.mimeType || data.mime_type || '';
+  if(/mpeg|mp3/.test(mime)) return new Blob([bytes], {type:'audio/mpeg'});
+  const rate = +((mime.match(/rate=(\d+)/)||[])[1] || 24000);
+  return new Blob([pcmToWav(bytes, rate)], {type:'audio/wav'});
+}
+function pcmToWav(bytes, rate){
+  const buf = new ArrayBuffer(44 + bytes.length), v = new DataView(buf);
+  const w = (o,s)=>{ for(let i=0;i<s.length;i++) v.setUint8(o+i, s.charCodeAt(i)); };
+  w(0,'RIFF'); v.setUint32(4,36+bytes.length,true); w(8,'WAVE'); w(12,'fmt ');
+  v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true); v.setUint32(24,rate,true);
+  v.setUint32(28,rate*2,true); v.setUint16(32,2,true); v.setUint16(34,16,true); w(36,'data'); v.setUint32(40,bytes.length,true);
+  new Uint8Array(buf, 44).set(bytes); return buf;
+}
+$('trPlay').onclick = ()=>{ unlockAudio(); if(lastSpeech) speak(lastSpeech); };
+$('trCopy').onclick = ()=>copyText($('trOut').textContent);
+$('trShare').onclick = ()=>shareText(`${$('trSrc').textContent}\n\n${$('trOut').textContent}`);
+
 // ---------- settings ----------
 function fillModels(list){
   const sel=$('model'); sel.innerHTML='';
   const all = Array.from(new Set([cfg.model, ...list].filter(Boolean)));
   for(const m of all){ const o=document.createElement('option'); o.value=m; o.textContent=m; sel.appendChild(o); }
   sel.value=cfg.model;
+  const ts=$('ttsModel'); ts.innerHTML='';
+  const tAll = Array.from(new Set([cfg.ttsModel||DEFAULT_TTS, ...(cfg.ttsModels||[])]));
+  for(const m of tAll){ const o=document.createElement('option'); o.value=m; o.textContent=m; ts.appendChild(o); }
+  ts.value=cfg.ttsModel||DEFAULT_TTS;
 }
 function openSettings(){ $('apiKey').value=cfg.key; $('vocab').value=cfg.vocab||''; fillModels(cfg.models||[]); $('settings').showModal(); }
 $('openSettings').onclick = openSettings;
@@ -472,8 +765,10 @@ $('loadModels').onclick = async ()=>{
   try{
     const res=await fetch(`${API}/models?pageSize=200`,{headers:{'x-goog-api-key':key}}); const j=await res.json();
     if(!res.ok) throw new Error(j?.error?.message||res.statusText);
-    const names=(j.models||[]).filter(m=>(m.supportedGenerationMethods||[]).includes('generateContent'))
-      .map(m=>m.name.replace('models/','')).filter(n=>/gemini/.test(n) && !/(tts|image|embed|live|omni|robotics|computer)/.test(n));
+    const all=(j.models||[]).filter(m=>(m.supportedGenerationMethods||[]).includes('generateContent')).map(m=>m.name.replace('models/',''));
+    const names=all.filter(n=>/gemini/.test(n) && !/(tts|image|embed|live|omni|robotics|computer)/.test(n));
+    cfg.ttsModels = all.filter(n=>/tts/.test(n)).sort((a,b)=>(/lite/.test(a)?1:0)-(/lite/.test(b)?1:0) || b.localeCompare(a,undefined,{numeric:true}));
+    if(cfg.ttsModels.length && !cfg.ttsModels.includes(cfg.ttsModel||DEFAULT_TTS)) cfg.ttsModel = cfg.ttsModels[0];
     names.sort((a,b)=>{ const s=n=>(/flash/.test(n)?0:1)+(/lite/.test(n)?0.5:0)+(/preview|exp/.test(n)?0.3:0); return s(a)-s(b) || b.localeCompare(a,undefined,{numeric:true}); });
     cfg.models=names;
     if(!names.includes(cfg.model) && names.length) cfg.model=names[0];
@@ -482,11 +777,11 @@ $('loadModels').onclick = async ()=>{
   }catch(e){ $('modelHint').innerHTML='<span class="err">'+(e.message==='Failed to fetch'?'အင်တာနက် မရပါ':e.message)+'</span>'; }
 };
 $('settingsForm').addEventListener('submit', ()=>{
-  cfg.key=$('apiKey').value.trim(); cfg.model=$('model').value||cfg.model; cfg.vocab=$('vocab').value.trim();
+  cfg.key=$('apiKey').value.trim(); cfg.model=$('model').value||cfg.model; cfg.vocab=$('vocab').value.trim(); cfg.ttsModel=$('ttsModel').value||cfg.ttsModel;
   store.set('mck.cfg',cfg); refreshNotice(); toast('သိမ်းပြီးပါပြီ');
 });
 
-renderModes(); renderLangs(); renderHistory(); refreshNotice();
+renderModes(); renderLangs(); renderTab(); renderTr(); renderHistory(); refreshNotice();
 if(!cfg.key) setTimeout(openSettings, 400);
 })();
 </script>
