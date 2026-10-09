@@ -353,10 +353,10 @@ async function gemini(parts, gen){
   const models = fallbackModels(); let lastErr;
   for(let mi=0; mi<models.length; mi++){
     for(let attempt=0; attempt<2; attempt++){
-      try{ return await geminiOnce(parts, models[mi], gen); }
+      try{ return await withNetRetry(()=>geminiOnce(parts, models[mi], gen)); }
       catch(e){
         lastErr = e;
-        if(!e.retryable) throw e;
+        if(!e.retryable || e.network) throw e;
         const next = attempt===0 ? `${models[mi]} ကို ပြန်စမ်းနေပါတယ်…` : (models[mi+1] ? `${models[mi+1]} နဲ့ ပြောင်းစမ်းနေပါတယ်…` : '');
         if(next) setStatus(`<span class="spinner"></span> Model အလုပ်များနေလို့ ${next}`);
         if(attempt===0) await sleep(2500);
@@ -365,13 +365,35 @@ async function gemini(parts, gen){
   }
   throw lastErr;
 }
+// Mobile data drops requests now and then ("Load failed" on iPhone). Retry those quietly.
+async function withNetRetry(fn){
+  const waits=[1500, 3000, 5000];
+  for(let i=0;;i++){
+    try{ return await fn(); }
+    catch(e){
+      if(!e.network || i>=waits.length) throw e;
+      const prev = $(statusTarget).innerHTML;
+      setStatus(`<span class="spinner"></span> အင်တာနက် ပြတ်သွားလို့ ပြန်ပို့နေပါတယ်… (${i+1}/${waits.length})`);
+      await sleep(waits[i]);
+      setStatus(prev);
+    }
+  }
+}
+async function netFetch(url, opts){
+  try{ return await fetch(url, opts); }
+  catch(e){
+    const err = new Error('အင်တာနက် ချိတ်ဆက်မှု မကောင်းပါ။ Wi-Fi / Data စစ်ပြီး "ပြန်စမ်းမည်" ကို နှိပ်ပါ။');
+    err.network = true; err.retryable = true; throw err;
+  }
+}
 async function geminiOnce(parts, model, gen){
-  const res = await fetch(`${API}/models/${encodeURIComponent(model)}:generateContent`, {
+  const res = await netFetch(`${API}/models/${encodeURIComponent(model)}:generateContent`, {
     method:'POST',
     headers:{'Content-Type':'application/json','x-goog-api-key':cfg.key},
     body: JSON.stringify({ contents:[{ role:'user', parts }], generationConfig:{ temperature:0.2, ...(gen||{}) } })
   });
-  const json = await res.json().catch(()=>({}));
+  const json = await res.json().catch(()=>null);
+  if(!json){ const err=new Error('အင်တာနက် ချိတ်ဆက်မှု မကောင်းပါ။ "ပြန်စမ်းမည်" ကို နှိပ်ပါ။'); err.network=true; err.retryable=true; throw err; }
   if(!res.ok) throw apiError(res, json, model);
   return extractText(json);
 }
@@ -442,7 +464,7 @@ async function process(blob, name){
     setStatus('ပြီးပါပြီ ✓');
   }catch(e){
     console.error(e);
-    const msg = e.name==='EncodingError' || /decode/i.test(e.message) ? 'ဒီအသံဖိုင်ကို ဖတ်မရပါ။ mp3 / m4a / wav ဖိုင်နဲ့ စမ်းပါ။' : (e.message==='Failed to fetch' ? 'အင်တာနက် ချိတ်ဆက်မှု မရပါ။' : e.message);
+    const msg = e.name==='EncodingError' || /decode/i.test(e.message) ? 'ဒီအသံဖိုင်ကို ဖတ်မရပါ။ mp3 / m4a / wav ဖိုင်နဲ့ စမ်းပါ။' : (/^(Failed to fetch|Load failed|NetworkError)/.test(e.message) ? 'အင်တာနက် ချိတ်ဆက်မှု မရပါ။' : e.message);
     setStatus(msg + '<br><button class="btn primary" type="button" id="retryBtn" style="margin-top:8px">ပြန်စမ်းမည် (အသံပြန်မဖမ်းရ)</button>', true);
     const rb = $('retryBtn'); if(rb) rb.onclick = ()=>process(blob, name);
   }finally{ busy=false; $('recBtn').disabled=false; }
@@ -663,7 +685,7 @@ Return JSON only: {"source_text": "...", "translation": "..."}`;
     await speak(lastSpeech);
   }catch(e){
     console.error(e);
-    const msg = e.message==='Failed to fetch' ? 'အင်တာနက် ချိတ်ဆက်မှု မရပါ။' : e.message;
+    const msg = /^(Failed to fetch|Load failed|NetworkError)/.test(e.message) ? 'အင်တာနက် ချိတ်ဆက်မှု မရပါ။' : e.message;
     setStatus(msg + '<br><button class="btn primary" type="button" id="tRetry" style="margin-top:8px">ပြန်စမ်းမည် (အသံပြန်မဖမ်းရ)</button>', true);
     const rb=$('tRetry'); if(rb) rb.onclick=()=>{ unlockAudio(); interpret(blob, dir); };
   }finally{
@@ -704,11 +726,11 @@ async function ttsAudio(text){
   let lastErr;
   for(const m of models){
     for(const legacy of [false, true]){
-      try{ return await ttsOnce(text, m, legacy); }
+      try{ return await withNetRetry(()=>ttsOnce(text, m, legacy)); }
       catch(e){
         lastErr=e;
         if(e.status===400 && !legacy) continue;          // older request shape
-        if(e.retryable){ await sleep(1500); try{ return await ttsOnce(text, m, legacy); }catch(e2){ lastErr=e2; } }
+        if(e.retryable){ await sleep(1500); try{ return await withNetRetry(()=>ttsOnce(text, m, legacy)); }catch(e2){ lastErr=e2; } }
         break;
       }
     }
@@ -717,7 +739,7 @@ async function ttsAudio(text){
 }
 async function ttsOnce(text, model, legacy){
   const voiceConfig = legacy ? { prebuiltVoiceConfig:{ voiceName: trVoice } } : { voice: trVoice };
-  const res = await fetch(`${API}/models/${encodeURIComponent(model)}:generateContent`, {
+  const res = await netFetch(`${API}/models/${encodeURIComponent(model)}:generateContent`, {
     method:'POST', headers:{'Content-Type':'application/json','x-goog-api-key':cfg.key},
     body: JSON.stringify({ contents:[{ role:'user', parts:[{ text }] }], generationConfig:{ responseModalities:['AUDIO'], speechConfig:{ voiceConfig } } })
   });
