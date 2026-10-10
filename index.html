@@ -401,6 +401,7 @@ function apiError(res, json, model){
   const msg = json?.error?.message || res.statusText;
   let err;
   if(res.status===400 && /API key/i.test(msg)) return new Error('API key မှားနေပါတယ်။ Settings မှာ စစ်ပါ။');
+  if(/location is not supported/i.test(msg)) return new Error('ဒီဖုန်းရဲ့ အင်တာနက်တည်နေရာကို Google က လက်မခံပါ။ VPN ဖွင့်ထားရင် ပိတ်ကြည့်ပါ (ဒါမှမဟုတ် Hong Kong / China မဟုတ်တဲ့ server ကို ရွေးပါ)။');
   if(res.status===404){ err = new Error(`Model "${model}" မရှိပါ။ Settings မှာ "Model စာရင်းယူ" နှိပ်ပြီး ပြန်ရွေးပါ။`); err.retryable = model!==cfg.model; }
   else if(res.status===429){ err = new Error('အသုံးပြုမှု ကန့်သတ်ချက် ပြည့်သွားပါပြီ။ ခဏနေမှ ပြန်စမ်းပါ။'); err.retryable = true; }
   else if(res.status>=500){ err = new Error('Google ဘက်က Model တွေ အလုပ်များနေပါတယ်။ ခဏနေမှ "ပြန်စမ်းမည်" ကို နှိပ်ပါ။'); err.retryable = true; }
