@@ -238,7 +238,7 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
     <h2 style="margin:0 0 12px;font-size:17px">Settings</h2>
     <div class="field">
       <label for="apiKey" class="label">Gemini API key</label>
-      <input id="apiKey" type="password" autocomplete="off" placeholder="AIza...">
+      <div style="display:flex;gap:6px"><input id="apiKey" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="AIza..." style="flex:1;min-width:0"><button class="btn" id="keyShow" type="button">👁 ပြ</button><button class="btn" id="keyCopy" type="button">Copy</button></div>
       <span class="hint">Google AI Studio မှာ အခမဲ့ ယူနိုင်ပါတယ် — <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>။ Key ကို ဒီဖုန်းထဲမှာပဲ သိမ်းပါတယ်။</span>
     </div>
     <div class="field">
@@ -928,8 +928,14 @@ function fillModels(list){
   for(const m of tAll){ const o=document.createElement('option'); o.value=m; o.textContent=m; ts.appendChild(o); }
   ts.value=cfg.ttsModel||DEFAULT_TTS;
 }
-function openSettings(){ $('apiKey').value=cfg.key; $('vocab').value=cfg.vocab||''; fillModels(cfg.models||[]); $('settings').showModal(); }
+function openSettings(){ $('apiKey').type='password'; $('keyShow').textContent='👁 ပြ'; $('apiKey').value=cfg.key; $('vocab').value=cfg.vocab||''; fillModels(cfg.models||[]); $('settings').showModal(); }
 $('openSettings').onclick = openSettings;
+$('keyShow').onclick = ()=>{ const i=$('apiKey'); const show = i.type==='password'; i.type = show ? 'text' : 'password'; $('keyShow').textContent = show ? '🙈 ဖျောက်' : '👁 ပြ'; };
+$('keyCopy').onclick = async ()=>{
+  const v=$('apiKey').value.trim(); if(!v){ toast('Key မရှိသေးပါ'); return; }
+  try{ await navigator.clipboard.writeText(v); toast('Key ကို Copy ကူးပြီးပါပြီ'); }
+  catch(e){ const i=$('apiKey'); i.type='text'; $('keyShow').textContent='🙈 ဖျောက်'; i.focus(); i.select(); toast('Key ကို ရွေးထားပါတယ် — Copy နှိပ်ပါ'); }
+};
 $('loadModels').onclick = async ()=>{
   const key=$('apiKey').value.trim(); if(!key){ $('modelHint').textContent='API key အရင်ထည့်ပါ။'; return; }
   $('modelHint').innerHTML='<span class="spinner"></span> ယူနေပါတယ်…';
