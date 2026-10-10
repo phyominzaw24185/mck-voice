@@ -128,6 +128,10 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 .tr-src{color:var(--muted);font-size:14px;white-space:pre-wrap}
 .fast-row{display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer}
 .fast-row input{width:18px;height:18px;accent-color:var(--accent)}
+[contenteditable="true"]{outline:2px dashed var(--accent);outline-offset:4px;border-radius:6px;background:var(--bg)}
+.edit-area{width:100%;min-height:140px;margin:6px 0 8px}
+.saved-hint{font-size:12px;color:var(--accent);opacity:0;transition:opacity .2s}
+.saved-hint.show{opacity:1}
 .re-pick{margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)}
 .tr-out{font-size:21px;line-height:1.75;font-weight:600;white-space:pre-wrap;word-break:break-word;margin-bottom:6px}
 </style>
@@ -185,6 +189,14 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
         <button class="btn" id="trCopy" type="button">Copy</button>
         <button class="btn" id="trShareAudio" type="button">⤴ အသံပို့</button>
         <button class="btn" id="trShare" type="button">Share</button>
+        <button class="btn" id="trEdit" type="button">✏️ စာပြင်</button>
+      </div>
+      <div id="trEditBar" hidden style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
+        <span class="hint">အပေါ်က စာကို နှိပ်ပြီး ရိုက်ပြင်ပါ။ <b>ပြောခဲ့သည်</b> ကို ပြင်ရင် "ပြန်ဘာသာပြန်" ကို နှိပ်ပါ။ ဘာသာပြန်စာကို ပြင်ရင် ▶ အသံခလုတ်ကို နှိပ်ရုံပါပဲ။</span>
+        <div class="actions">
+          <button class="btn primary" id="trRedo" type="button">↻ ပြင်ထားတဲ့စာနဲ့ ပြန်ဘာသာပြန်</button>
+          <button class="btn" id="trEditDone" type="button">ပြီးပြီ</button>
+        </div>
       </div>
     </div>
   </section>
@@ -220,7 +232,8 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
   </section>
 
   <section class="panel" id="resultPanel" hidden>
-    <div class="hist-head" style="margin-bottom:8px"><h2>ရလဒ်</h2><span class="label" id="resultMeta"></span></div>
+    <div class="hist-head" style="margin-bottom:8px"><h2>ရလဒ် <span class="saved-hint" id="savedHint">✓ သိမ်းပြီး</span></h2><span class="label" id="resultMeta"></span></div>
+    <span class="hint">စာမှားနေရင် အောက်က အကွက်ထဲမှာ တိုက်ရိုက် ရိုက်ပြင်လို့ရပါတယ်။ အလိုလို သိမ်းပေးပါတယ်။</span>
     <textarea id="result" aria-label="ရလဒ်စာသား"></textarea>
     <div class="actions" style="margin-top:10px">
       <button class="btn primary" id="copyBtn" type="button">Copy</button>
@@ -495,7 +508,7 @@ async function process(blob, name){
     const p = postPrompt(text);
     if(p){ setStatus('<span class="spinner"></span> '+MODE_LABEL[mode]+' ပြုလုပ်နေပါတယ်…'); text = await gemini([{ text:p }]); }
     showResult(text, duration);
-    const hid = addHistory(text, duration, text!==transcript ? { transcript } : undefined);
+    const hid = addHistory(text, duration, text!==transcript ? { transcript } : undefined); resultHid = hid;
     if(blob.size < 25e6) saveAudio(hid, { src: blob });
     setStatus('ပြီးပါပြီ ✓');
   }catch(e){
@@ -505,11 +518,22 @@ async function process(blob, name){
     const rb = $('retryBtn'); if(rb) rb.onclick = ()=>process(blob, name);
   }finally{ busy=false; $('recBtn').disabled=false; }
 }
+let resultHid=null;
 function showResult(text, duration){
+  resultHid=null;
   $('resultPanel').hidden=false; $('result').value=text;
   $('resultMeta').textContent = `${MODE_LABEL[mode]} · ${LANG_LABEL[lang]} · ${fmt(duration)}`;
 }
 $('copyBtn').onclick = ()=>copyText($('result').value);
+let saveT=null;
+$('result').addEventListener('input', ()=>{
+  clearTimeout(saveT);
+  saveT=setTimeout(()=>{
+    const h=history.find(x=>x.id===resultHid); if(!h) return;
+    h.text=$('result').value; store.set('mck.hist',history); renderHistory();
+    const hint=$('savedHint'); hint.classList.add('show'); setTimeout(()=>hint.classList.remove('show'),1200);
+  }, 600);
+});
 $('shareBtn').onclick = ()=>shareText($('result').value);
 $('redoBtn').onclick = ()=>{ if(lastAudio) process(lastAudio.blob, lastAudio.name); else toast('ပြန်ပြောင်းစရာ အသံမရှိပါ'); };
 
@@ -639,7 +663,7 @@ function renderHistory(){
   for(const h of history){
     const d=new Date(h.at);
     const item=document.createElement('div'); item.className='item';
-    item.innerHTML=`<div class="item-meta"><span>${d.toLocaleDateString('en-GB')} ${d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})} · ${fmt(h.duration||0)}</span><span class="tag">${h.tag || ((MODE_LABEL[h.mode]||'') + (h.lang && h.lang!=='mix' ? ' · '+LANG_LABEL[h.lang] : ''))}</span></div><div class="item-text"></div>${(h.hasSrc||h.hasOut)?`<div class="actions" style="margin-bottom:8px">${h.hasSrc?`<button class="btn" data-a="psrc" type="button">▶ မူရင်းအသံ</button>`:''}${h.hasOut?`<button class="btn primary" data-a="pout" type="button">▶ ဘာသာပြန်အသံ</button><button class="btn" data-a="sout" type="button">⤴ အသံပို့</button>`:''}${h.hasSrc&&!h.hasOut?`<button class="btn" data-a="ssrc" type="button">⤴ အသံပို့</button>`:''}</div>`:''}<div class="actions">${h.mode==='voice'?'<button class="btn" data-a="voice" type="button">🗣 အသံပြောင်း</button>':''}${h.mode!=='voice' && (h.transcript || ((h.mode==='summary'||h.mode==='todo'||/^to_/.test(h.lang||'')) && h.hasSrc)) ? '<button class="btn" data-a="full" type="button">📝 ပြောခဲ့တဲ့စာ အပြည့်</button>' : ''}<button class="btn" data-a="re" type="button">🌐 တခြားဘာသာ</button><button class="btn" data-a="copy" type="button">Copy</button><button class="btn" data-a="share" type="button">Share</button><button class="btn" data-a="more" type="button">အပြည့်ကြည့်</button><button class="btn" data-a="del" type="button">ဖျက်</button></div>`;
+    item.innerHTML=`<div class="item-meta"><span>${d.toLocaleDateString('en-GB')} ${d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})} · ${fmt(h.duration||0)}</span><span class="tag">${h.tag || ((MODE_LABEL[h.mode]||'') + (h.lang && h.lang!=='mix' ? ' · '+LANG_LABEL[h.lang] : ''))}</span></div><div class="item-text"></div>${(h.hasSrc||h.hasOut)?`<div class="actions" style="margin-bottom:8px">${h.hasSrc?`<button class="btn" data-a="psrc" type="button">▶ မူရင်းအသံ</button>`:''}${h.hasOut?`<button class="btn primary" data-a="pout" type="button">▶ ဘာသာပြန်အသံ</button><button class="btn" data-a="sout" type="button">⤴ အသံပို့</button>`:''}${h.hasSrc&&!h.hasOut?`<button class="btn" data-a="ssrc" type="button">⤴ အသံပို့</button>`:''}</div>`:''}<div class="actions">${h.mode==='voice'?'<button class="btn" data-a="voice" type="button">🗣 အသံပြောင်း</button>':''}${h.mode!=='voice' && (h.transcript || ((h.mode==='summary'||h.mode==='todo'||/^to_/.test(h.lang||'')) && h.hasSrc)) ? '<button class="btn" data-a="full" type="button">📝 ပြောခဲ့တဲ့စာ အပြည့်</button>' : ''}<button class="btn" data-a="re" type="button">🌐 တခြားဘာသာ</button><button class="btn" data-a="edit" type="button">✏️ ပြင်</button><button class="btn" data-a="copy" type="button">Copy</button><button class="btn" data-a="share" type="button">Share</button><button class="btn" data-a="more" type="button">အပြည့်ကြည့်</button><button class="btn" data-a="del" type="button">ဖျက်</button></div>`;
     item.querySelector('.item-text').textContent=h.text;
     const pick=document.createElement('div'); pick.className='chip-group re-pick'; pick.hidden=true;
     pick.innerHTML='<span class="label" style="width:100%">ဘယ်ဘာသာကို ပြောင်းမလဲ</span>' + reTargets(h).map(([k,L])=>`<button class="chip" type="button" data-re="${k}">${L.my} — ${L.label}</button>`).join('');
@@ -649,6 +673,24 @@ function renderHistory(){
       const a=e.target.closest('button')?.dataset.a; if(!a) return;
       if(a==='re'){ pick.hidden=!pick.hidden; return; }
       if(a==='voice'){ openInCard(h); return; }
+      if(a==='edit'){
+        const box=item.querySelector('.item-text');
+        const ta=document.createElement('textarea'); ta.className='edit-area'; ta.value=h.text; ta.id='edit-'+h.id;
+        const bar=document.createElement('div'); bar.className='actions'; bar.style.marginBottom='8px';
+        bar.innerHTML='<button class="btn primary" type="button" data-e="save">သိမ်းမည်</button><button class="btn" type="button" data-e="cancel">မလုပ်တော့</button>';
+        box.replaceWith(ta); ta.after(bar); ta.focus();
+        bar.addEventListener('click', ev=>{
+          ev.stopPropagation();
+          const k=ev.target.closest('[data-e]')?.dataset.e; if(!k) return;
+          if(k==='save'){
+            h.text=ta.value.trim();
+            if(h.mode==='voice'){ h.src=h.text.split('\n\n→ ')[0].trim(); }
+            store.set('mck.hist',history); toast('သိမ်းပြီးပါပြီ');
+          }
+          renderHistory();
+        });
+        return;
+      }
       if(a==='full'){
         if(h.transcript){
           const box=item.querySelector('.item-text'); const showing = box.dataset.full==='1';
@@ -794,7 +836,7 @@ Return JSON only: {"source_text": "...", "translation": "..."}`;
     let out; try{ out = JSON.parse(raw); }catch(e){ out = { source_text:'', translation: raw }; }
     const srcText=(out.source_text||'').trim(), trText=(out.translation||'').trim();
     if(!trText) throw new Error('စကားသံ မကြားရပါ။ ဖုန်းကို နီးနီးကပ်ပြီး ထပ်ပြောကြည့်ပါ။');
-    $('trResult').hidden=false;
+    $('trResult').hidden=false; setCardEditing(false);
     $('trSrc').textContent = srcText; $('trSrc').lang = src.bcp;
     $('trOut').textContent = trText; $('trOut').lang = dst.bcp;
     $('trOutLabel').textContent = `${dst.my} — ${dst.label}`;
@@ -910,8 +952,42 @@ $('trVoices').addEventListener('click', e=>{
   const b=e.target.closest('[data-voice]'); if(!b || !lastSpeech) return;
   unlockAudio();
   trVoice=b.dataset.voice; $('trVoice').value=trVoice; store.set('mck.trVoice',trVoice);
-  renderVoiceBtns(); speak(lastSpeech);
+  renderVoiceBtns(); if($('trOut').isContentEditable) syncCardToHistory(); speak(lastSpeech);
 });
+function setCardEditing(on){
+  $('trSrc').contentEditable = on ? 'true' : 'false';
+  $('trOut').contentEditable = on ? 'true' : 'false';
+  $('trEditBar').hidden = !on; $('trEdit').hidden = on;
+  if(on){ $('trSrc').focus(); } else syncCardToHistory();
+}
+// Keep the History item in step with what is in the card.
+function syncCardToHistory(){
+  if(!lastSpeech) return;
+  const srcText=$('trSrc').innerText.trim(), outText=$('trOut').innerText.trim();
+  if(outText && outText!==lastSpeech.text){ lastSpeech.text=outText; lastSpeech.cache={}; }
+  const h=history.find(x=>x.id===lastSpeech.hid); if(!h) return;
+  h.src=srcText; h.text=`${srcText}\n\n→ ${outText}`; store.set('mck.hist',history); renderHistory();
+}
+$('trEdit').onclick = ()=>setCardEditing(true);
+$('trEditDone').onclick = ()=>setCardEditing(false);
+$('trOut').addEventListener('input', ()=>{ if(lastSpeech){ lastSpeech.text=$('trOut').innerText.trim(); lastSpeech.cache={}; } });
+$('trRedo').onclick = async ()=>{
+  if(!lastSpeech || tBusy) return;
+  unlockAudio();
+  const h=history.find(x=>x.id===lastSpeech.hid)||{};
+  const srcText=$('trSrc').innerText.trim(); if(!srcText){ toast('စာ မရှိပါ'); return; }
+  const dst=lastSpeech.lang, srcName=h.srcName||'Burmese (or Burmese mixed with English)';
+  tBusy=true; statusTarget='tStatus'; busyStart=Date.now();
+  try{
+    setStatus(`<span class="spinner"></span> ${dst.my}လို ပြန်ပြောင်းနေပါတယ်…`);
+    const trText=(await gemini([{ text:`Translate the following ${srcName} text into ${dst.name}, the way a human interpreter would say it out loud: natural, polite, spoken style, same meaning, nothing added or left out. Keep names and numbers. Output only the translation.\n\n${srcText}` }], undefined, trFast)).trim();
+    $('trOut').textContent=trText;
+    lastSpeech.text=trText; lastSpeech.cache={};
+    setCardEditing(false);
+    await speak(lastSpeech);
+  }catch(e){ setStatus(e.message, true); }
+  finally{ tBusy=false; }
+};
 $('trShareAudio').onclick = ()=>{ if(lastSpeech && lastSpeech.hid) shareClip(lastSpeech.hid,'out'); else toast('အသံ မရှိသေးပါ'); };
 renderVoiceBtns();
 // Open a saved translation in the result card so it can be heard in another voice.
@@ -922,7 +998,7 @@ function openInCard(h){
   if(!key || !trText){ toast('ဒီမှတ်တမ်းကို အသံပြောင်းလို့ မရပါ'); return; }
   const dst = key==='my' ? MY : TR_LANGS[key];
   tab='tr'; store.set('mck.tab',tab); renderTab(); window.scrollTo({ top:0, behavior:'smooth' });
-  $('trResult').hidden=false;
+  $('trResult').hidden=false; setCardEditing(false);
   $('trSrc').textContent=(h.src ?? srcText).trim(); $('trOut').textContent=trText.trim(); $('trOut').lang=dst.bcp;
   $('trOutLabel').textContent=`${dst.my} — ${dst.label}`;
   lastSpeech = { text: trText.trim(), lang: dst, hid: h.id };
@@ -948,7 +1024,7 @@ async function retranslate(h, key){
   try{
     setStatus(`<span class="spinner"></span> ${dst.my}လို ပြောင်းနေပါတယ်…`);
     const trText = (await gemini([{ text:`Translate the following ${srcName} text into ${dst.name}, the way a human interpreter would say it out loud: natural, polite, spoken style, same meaning, nothing added or left out. Keep names and numbers. Output only the translation.\n\n${srcText}` }], undefined, trFast)).trim();
-    $('trResult').hidden=false;
+    $('trResult').hidden=false; setCardEditing(false);
     $('trSrc').textContent = srcText;
     $('trOut').textContent = trText; $('trOut').lang = dst.bcp;
     $('trOutLabel').textContent = `${dst.my} — ${dst.label}`;
