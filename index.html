@@ -126,6 +126,8 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 @media (prefers-reduced-motion:reduce){.talk.on{animation:none}}
 .tr-card{border-top:1px solid var(--line);padding-top:12px;display:flex;flex-direction:column;gap:4px}
 .tr-src{color:var(--muted);font-size:14px;white-space:pre-wrap}
+.fast-row{display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer}
+.fast-row input{width:18px;height:18px;accent-color:var(--accent)}
 .re-pick{margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)}
 .tr-out{font-size:21px;line-height:1.75;font-weight:600;white-space:pre-wrap;word-break:break-word;margin-bottom:6px}
 </style>
@@ -148,6 +150,7 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
   </nav>
 
   <section class="panel tr" id="tabTr" hidden>
+    <label class="fast-row" for="trFast"><input type="checkbox" id="trFast"> <span>⚡ အမြန်မုဒ် <small style="color:var(--muted)">(ပိုမြန်ပေမဲ့ မှန်ကန်မှု နည်းနည်းကျနိုင်)</small></span></label>
     <div class="tr-pick">
       <div class="field">
         <label for="trLang" class="label">ပြန်ဆိုမည့် ဘာသာ</label>
@@ -285,7 +288,14 @@ let lastAudio = null; // {blob, name}
 // ---------- ui helpers ----------
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove('show'),2200); }
 let statusTarget='status';
-function setStatus(html, isErr){ const s=$(statusTarget); s.innerHTML=html; s.classList.toggle('err', !!isErr); }
+let busyStart=0;
+function setStatus(html, isErr){
+  const s=$(statusTarget);
+  s.innerHTML = html + (/spinner/.test(html) && busyStart ? ' <span class="secs" style="font-variant-numeric:tabular-nums;opacity:.7"></span>' : '');
+  s.classList.toggle('err', !!isErr); tickSecs();
+}
+function tickSecs(){ const n=Math.floor((Date.now()-busyStart)/1000); document.querySelectorAll('.secs').forEach(x=>x.textContent=`${n} စက္ကန့်`); }
+setInterval(tickSecs, 500);
 function fmt(sec){ sec=Math.max(0,Math.floor(sec)); return String(Math.floor(sec/60)).padStart(2,'0')+':'+String(sec%60).padStart(2,'0'); }
 function refreshNotice(){ $('keyNotice').hidden = !!cfg.key; }
 async function copyText(text){
@@ -351,8 +361,12 @@ function fallbackModels(){
   return [cfg.model, ...flash.slice(0,3)];
 }
 // Retries busy/overloaded errors, then moves on to the next model.
-async function gemini(parts, gen){
-  const models = fallbackModels(); let lastErr;
+function liteModel(){
+  const list = cfg.models||[];
+  return list.find(m=>/flash-lite/.test(m) && !/(tts|image|live|transcribe)/.test(m)) || 'gemini-3.5-flash-lite';
+}
+async function gemini(parts, gen, fast){
+  const models = fast ? Array.from(new Set([liteModel(), ...fallbackModels()])) : fallbackModels(); let lastErr;
   for(let mi=0; mi<models.length; mi++){
     for(let attempt=0; attempt<2; attempt++){
       try{ return await withNetRetry(()=>geminiOnce(parts, models[mi], gen)); }
@@ -381,12 +395,16 @@ async function withNetRetry(fn){
     }
   }
 }
+// A stuck mobile connection can hang forever, so give up after REQ_TIMEOUT and retry.
+const REQ_TIMEOUT = 30000;
 async function netFetch(url, opts){
-  try{ return await fetch(url, opts); }
+  const ctl = new AbortController(); const t = setTimeout(()=>ctl.abort(), REQ_TIMEOUT);
+  try{ return await fetch(url, { ...opts, signal: ctl.signal }); }
   catch(e){
-    const err = new Error('အင်တာနက် ချိတ်ဆက်မှု မကောင်းပါ။ Wi-Fi / Data စစ်ပြီး "ပြန်စမ်းမည်" ကို နှိပ်ပါ။');
+    const slow = e.name==='AbortError';
+    const err = new Error(slow ? 'အင်တာနက် အရမ်းနှေးနေပါတယ်။ ခဏနေမှ "ပြန်စမ်းမည်" ကို နှိပ်ပါ။' : 'အင်တာနက် ချိတ်ဆက်မှု မကောင်းပါ။ Wi-Fi / Data စစ်ပြီး "ပြန်စမ်းမည်" ကို နှိပ်ပါ။');
     err.network = true; err.retryable = true; throw err;
-  }
+  }finally{ clearTimeout(t); }
 }
 // Short thinking = much faster answers. Older/odd models that reject it are remembered and sent without.
 const noThink = new Set(store.get('mck.noThink', []));
@@ -460,7 +478,7 @@ function encodeWav(samples, rate){
 let busy=false;
 async function process(blob, name){
   if(!cfg.key){ openSettings(); toast('API key အရင်ထည့်ပါ'); return; }
-  if(busy) return; busy=true; $('recBtn').disabled=true; statusTarget='status';
+  if(busy) return; busy=true; $('recBtn').disabled=true; statusTarget='status'; busyStart=Date.now();
   lastAudio = { blob, name };
   try{
     setStatus('<span class="spinner"></span> အသံကို ပြင်ဆင်နေပါတယ်…');
@@ -665,12 +683,14 @@ const TR_LANGS = {
 const MY = { name:'Burmese (Myanmar Unicode script)', my:'မြန်မာ', label:'မြန်မာ', bcp:'my-MM' };
 let trLang = store.get('mck.trLang', 'en');
 let trVoice = store.get('mck.trVoice', 'Kore');
+let trFast = store.get('mck.trFast', false);
 let tRec=null, tStream=null, tChunks=[], tT0=0, tTick=null, tDir=null, tBusy=false, lastSpeech=null;
 
 (function initTr(){
   const sel=$('trLang');
   for(const [k,v] of Object.entries(TR_LANGS)){ const o=document.createElement('option'); o.value=k; o.textContent=`${v.my} — ${v.label}`; sel.appendChild(o); }
-  sel.value=trLang; $('trVoice').value=trVoice;
+  sel.value=trLang; $('trVoice').value=trVoice; $('trFast').checked=trFast;
+  $('trFast').onchange=()=>{ trFast=$('trFast').checked; store.set('mck.trFast',trFast); };
   sel.onchange=()=>{ trLang=sel.value; store.set('mck.trLang',trLang); renderTr(); };
   $('trVoice').onchange=()=>{ trVoice=$('trVoice').value; store.set('mck.trVoice',trVoice); };
 })();
@@ -734,7 +754,7 @@ function onTalk(e){
 $('talkMe').onclick = onTalk; $('talkThem').onclick = onTalk;
 
 async function interpret(blob, dir){
-  tBusy=true; statusTarget='tStatus';
+  tBusy=true; statusTarget='tStatus'; busyStart=Date.now();
   $('talkMe').disabled=true; $('talkThem').disabled=true;
   const L = TR_LANGS[trLang];
   const src = dir==='me' ? MY : L, dst = dir==='me' ? L : MY;
@@ -749,7 +769,7 @@ Return JSON only: {"source_text": "...", "translation": "..."}`;
     const raw = await gemini([{ text: prompt }, { inline_data:{ mime_type:'audio/wav', data: b64(chunks[0]) } }], {
       responseMimeType:'application/json',
       responseSchema:{ type:'OBJECT', properties:{ source_text:{type:'STRING'}, translation:{type:'STRING'} }, required:['source_text','translation'] }
-    });
+    }, trFast);
     let out; try{ out = JSON.parse(raw); }catch(e){ out = { source_text:'', translation: raw }; }
     const srcText=(out.source_text||'').trim(), trText=(out.translation||'').trim();
     if(!trText) throw new Error('စကားသံ မကြားရပါ။ ဖုန်းကို နီးနီးကပ်ပြီး ထပ်ပြောကြည့်ပါ။');
@@ -896,10 +916,10 @@ async function retranslate(h, key){
   const srcLabel = h.srcLabel || MY.label, srcName = h.srcName || 'Burmese (or Burmese mixed with English)';
   const dst = key==='my' ? MY : TR_LANGS[key];
   tab='tr'; store.set('mck.tab',tab); renderTab(); window.scrollTo({ top:0, behavior:'smooth' });
-  tBusy=true; statusTarget='tStatus'; $('talkMe').disabled=true; $('talkThem').disabled=true;
+  tBusy=true; statusTarget='tStatus'; busyStart=Date.now(); $('talkMe').disabled=true; $('talkThem').disabled=true;
   try{
     setStatus(`<span class="spinner"></span> ${dst.my}လို ပြောင်းနေပါတယ်…`);
-    const trText = (await gemini([{ text:`Translate the following ${srcName} text into ${dst.name}, the way a human interpreter would say it out loud: natural, polite, spoken style, same meaning, nothing added or left out. Keep names and numbers. Output only the translation.\n\n${srcText}` }])).trim();
+    const trText = (await gemini([{ text:`Translate the following ${srcName} text into ${dst.name}, the way a human interpreter would say it out loud: natural, polite, spoken style, same meaning, nothing added or left out. Keep names and numbers. Output only the translation.\n\n${srcText}` }], undefined, trFast)).trim();
     $('trResult').hidden=false;
     $('trSrc').textContent = srcText;
     $('trOut').textContent = trText; $('trOut').lang = dst.bcp;
