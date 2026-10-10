@@ -489,12 +489,13 @@ async function process(blob, name){
       pieces.push(await gemini([{ text: transcribePrompt() }, { inline_data:{ mime_type:'audio/wav', data: b64(chunks[i]) } }]));
     }
     let text = pieces.join('\n\n');
+    const transcript = text;
     const tp = translatePrompt(text);
     if(tp){ setStatus('<span class="spinner"></span> ဘာသာပြန်နေပါတယ်…'); text = await gemini([{ text:tp }]); }
     const p = postPrompt(text);
     if(p){ setStatus('<span class="spinner"></span> '+MODE_LABEL[mode]+' ပြုလုပ်နေပါတယ်…'); text = await gemini([{ text:p }]); }
     showResult(text, duration);
-    const hid = addHistory(text, duration);
+    const hid = addHistory(text, duration, text!==transcript ? { transcript } : undefined);
     if(blob.size < 25e6) saveAudio(hid, { src: blob });
     setStatus('ပြီးပါပြီ ✓');
   }catch(e){
@@ -511,6 +512,17 @@ function showResult(text, duration){
 $('copyBtn').onclick = ()=>copyText($('result').value);
 $('shareBtn').onclick = ()=>shareText($('result').value);
 $('redoBtn').onclick = ()=>{ if(lastAudio) process(lastAudio.blob, lastAudio.name); else toast('ပြန်ပြောင်းစရာ အသံမရှိပါ'); };
+
+// Older items saved only the summary: rebuild the full text from their saved recording.
+async function retranscribe(h){
+  const rec = await audioDB.get(h.id);
+  if(!rec || !rec.src){ toast('မူရင်းအသံ မရှိတော့လို့ ပြန်ထုတ်လို့ မရပါ'); return; }
+  tab='stt'; store.set('mck.tab',tab); renderTab();
+  mode='clean'; store.set('mck.mode',mode); renderModes();
+  lang='mix'; store.set('mck.lang',lang); renderLangs();
+  window.scrollTo({ top:0, behavior:'smooth' });
+  process(rec.src, 'history');
+}
 
 // ---------- recording ----------
 let rec=null, stream=null, chunksRec=[], t0=0, tick=null, analyser=null, raf=null, actx=null;
@@ -627,7 +639,7 @@ function renderHistory(){
   for(const h of history){
     const d=new Date(h.at);
     const item=document.createElement('div'); item.className='item';
-    item.innerHTML=`<div class="item-meta"><span>${d.toLocaleDateString('en-GB')} ${d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})} · ${fmt(h.duration||0)}</span><span class="tag">${h.tag || ((MODE_LABEL[h.mode]||'') + (h.lang && h.lang!=='mix' ? ' · '+LANG_LABEL[h.lang] : ''))}</span></div><div class="item-text"></div>${(h.hasSrc||h.hasOut)?`<div class="actions" style="margin-bottom:8px">${h.hasSrc?`<button class="btn" data-a="psrc" type="button">▶ မူရင်းအသံ</button>`:''}${h.hasOut?`<button class="btn primary" data-a="pout" type="button">▶ ဘာသာပြန်အသံ</button><button class="btn" data-a="sout" type="button">⤴ အသံပို့</button>`:''}${h.hasSrc&&!h.hasOut?`<button class="btn" data-a="ssrc" type="button">⤴ အသံပို့</button>`:''}</div>`:''}<div class="actions">${h.mode==='voice'?'<button class="btn" data-a="voice" type="button">🗣 အသံပြောင်း</button>':''}<button class="btn" data-a="re" type="button">🌐 တခြားဘာသာ</button><button class="btn" data-a="copy" type="button">Copy</button><button class="btn" data-a="share" type="button">Share</button><button class="btn" data-a="more" type="button">အပြည့်ကြည့်</button><button class="btn" data-a="del" type="button">ဖျက်</button></div>`;
+    item.innerHTML=`<div class="item-meta"><span>${d.toLocaleDateString('en-GB')} ${d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})} · ${fmt(h.duration||0)}</span><span class="tag">${h.tag || ((MODE_LABEL[h.mode]||'') + (h.lang && h.lang!=='mix' ? ' · '+LANG_LABEL[h.lang] : ''))}</span></div><div class="item-text"></div>${(h.hasSrc||h.hasOut)?`<div class="actions" style="margin-bottom:8px">${h.hasSrc?`<button class="btn" data-a="psrc" type="button">▶ မူရင်းအသံ</button>`:''}${h.hasOut?`<button class="btn primary" data-a="pout" type="button">▶ ဘာသာပြန်အသံ</button><button class="btn" data-a="sout" type="button">⤴ အသံပို့</button>`:''}${h.hasSrc&&!h.hasOut?`<button class="btn" data-a="ssrc" type="button">⤴ အသံပို့</button>`:''}</div>`:''}<div class="actions">${h.mode==='voice'?'<button class="btn" data-a="voice" type="button">🗣 အသံပြောင်း</button>':''}${h.mode!=='voice' && (h.transcript || ((h.mode==='summary'||h.mode==='todo'||/^to_/.test(h.lang||'')) && h.hasSrc)) ? '<button class="btn" data-a="full" type="button">📝 ပြောခဲ့တဲ့စာ အပြည့်</button>' : ''}<button class="btn" data-a="re" type="button">🌐 တခြားဘာသာ</button><button class="btn" data-a="copy" type="button">Copy</button><button class="btn" data-a="share" type="button">Share</button><button class="btn" data-a="more" type="button">အပြည့်ကြည့်</button><button class="btn" data-a="del" type="button">ဖျက်</button></div>`;
     item.querySelector('.item-text').textContent=h.text;
     const pick=document.createElement('div'); pick.className='chip-group re-pick'; pick.hidden=true;
     pick.innerHTML='<span class="label" style="width:100%">ဘယ်ဘာသာကို ပြောင်းမလဲ</span>' + reTargets(h).map(([k,L])=>`<button class="chip" type="button" data-re="${k}">${L.my} — ${L.label}</button>`).join('');
@@ -637,6 +649,15 @@ function renderHistory(){
       const a=e.target.closest('button')?.dataset.a; if(!a) return;
       if(a==='re'){ pick.hidden=!pick.hidden; return; }
       if(a==='voice'){ openInCard(h); return; }
+      if(a==='full'){
+        if(h.transcript){
+          const box=item.querySelector('.item-text'); const showing = box.dataset.full==='1';
+          box.textContent = showing ? h.text : h.transcript; box.dataset.full = showing ? '' : '1';
+          item.classList.toggle('open', !showing);
+          e.target.textContent = showing ? '📝 ပြောခဲ့တဲ့စာ အပြည့်' : '↩ ' + (MODE_LABEL[h.mode]||'ရလဒ်') + ' ပြန်ကြည့်';
+        } else retranscribe(h);
+        return;
+      }
       if(a==='copy') copyText(h.text);
       if(a==='share') shareText(h.text);
       if(a==='psrc') playClip(h.id,'src');
