@@ -133,7 +133,9 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 .saved-hint{font-size:12px;color:var(--accent);opacity:0;transition:opacity .2s}
 .saved-hint.show{opacity:1}
 .stop-bar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 64px);z-index:20;
-  border:0;border-radius:999px;padding:10px 22px;font-size:16px;font-weight:600;background:var(--rec);color:#fff;box-shadow:0 4px 16px rgba(0,0,0,.25)}
+  display:flex;gap:2px;border-radius:999px;overflow:hidden;background:var(--rec);box-shadow:0 4px 16px rgba(0,0,0,.25)}
+.stop-bar button{border:0;background:transparent;color:#fff;padding:10px 20px;font-size:16px;font-weight:600;white-space:nowrap}
+.stop-bar button+button{border-left:1px solid rgba(255,255,255,.35)}
 .re-pick{margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)}
 .tr-out{font-size:21px;line-height:1.75;font-weight:600;white-space:pre-wrap;word-break:break-word;margin-bottom:6px}
 </style>
@@ -282,7 +284,7 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 </dialog>
 
 <div class="toast" id="toast" role="status"></div>
-<button class="stop-bar" id="stopBar" type="button" hidden>⏹ အသံ ရပ်မည်</button>
+<div class="stop-bar" id="stopBar" hidden><button type="button" id="pauseBtn">⏸ ခဏရပ်</button><button type="button" id="stopBtn">⏹ ပိတ်</button></div>
 
 <script>
 (() => {
@@ -919,8 +921,8 @@ function browserSpeak(s){
   const v = same.find(v=>wantMale ? MALE.test(v.name) : FEMALE.test(v.name)) || same[0];
   s.phoneGenderMatch = !!(v && (wantMale ? MALE.test(v.name) : !MALE.test(v.name)));
   const u = new SpeechSynthesisUtterance(s.text); u.lang = s.lang.bcp; if(v) u.voice=v; u.rate=0.95;
-  u.onstart = ()=>{ $('stopBar').hidden=false; }; u.onend = u.onerror = ()=>{ $('stopBar').hidden=true; };
-  speechSynthesis.cancel(); speechSynthesis.speak(u); return true;
+  u.onstart = ()=>showBar('playing'); u.onend = u.onerror = ()=>showBar(null);
+  speechSynthesis.cancel(); usingPhoneVoice=true; speechSynthesis.speak(u); return true;
 }
 async function ttsAudio(text){
   const models = Array.from(new Set([cfg.ttsModel||DEFAULT_TTS, DEFAULT_TTS, 'gemini-3.1-flash-tts-preview']));
@@ -1015,15 +1017,29 @@ $('trRedo').onclick = async ()=>{
   finally{ tBusy=false; }
 };
 // Stop button floats on screen while anything is being read aloud.
-player.addEventListener('play', ()=>{ if(player.duration > 0.2 || isNaN(player.duration)) $('stopBar').hidden=false; });
-['pause','ended','emptied','error'].forEach(ev=>player.addEventListener(ev, ()=>{ $('stopBar').hidden=true; }));
+// Pause keeps the place; ▶ continues from there. ⏹ closes it.
+function showBar(state){
+  $('stopBar').hidden = !state;
+  $('pauseBtn').textContent = state==='paused' ? '▶ ဆက်ဖွင့်' : '⏸ ခဏရပ်';
+}
+let usingPhoneVoice=false;
+player.addEventListener('play', ()=>{ usingPhoneVoice=false; if(player.duration > 0.2 || isNaN(player.duration)) showBar('playing'); });
+player.addEventListener('pause', ()=>{ if(!player.ended && player.currentTime>0.05 && player.currentTime < (player.duration||Infinity)) showBar('paused'); else showBar(null); });
+['ended','emptied','error'].forEach(ev=>player.addEventListener(ev, ()=>showBar(null)));
+$('pauseBtn').onclick = ()=>{
+  if(usingPhoneVoice && window.speechSynthesis){
+    if(speechSynthesis.paused){ speechSynthesis.resume(); showBar('playing'); } else { speechSynthesis.pause(); showBar('paused'); }
+    return;
+  }
+  if(player.paused) player.play().catch(()=>{}); else player.pause();
+};
 function stopAudio(){
   try{ player.pause(); player.currentTime=0; }catch(e){}
   try{ window.speechSynthesis && speechSynthesis.cancel(); }catch(e){}
-  $('stopBar').hidden=true;
+  showBar(null);
   if(statusTarget==='tStatus') setStatus('⏹ ရပ်လိုက်ပါပြီ');
 }
-$('stopBar').onclick = stopAudio;
+$('stopBtn').onclick = stopAudio;
 $('trShareAudio').onclick = ()=>{ if(lastSpeech && lastSpeech.hid) shareClip(lastSpeech.hid,'out'); else toast('အသံ မရှိသေးပါ'); };
 renderVoiceBtns();
 // Open a saved translation in the result card so it can be heard in another voice.
