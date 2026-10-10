@@ -813,7 +813,8 @@ async function speak(s){
   }catch(e){
     console.warn('TTS', e);
     if(e && e.name==='NotAllowedError'){ setStatus('အောက်က ▶ အသံခလုတ်ကို နှိပ်ပြီး နားထောင်ပါ'); return; }
-    if(browserSpeak(s)) setStatus('🔊 ဖုန်းအသံနဲ့ ဖတ်ပြနေပါတယ် (Gemini အသံ မရလို့)');
+    const why = e && e.status===429 ? 'Gemini အသံထုတ် သုံးခွင့် ဒီနေ့အတွက် ပြည့်သွားလို့' : 'Gemini အသံ မရလို့';
+    if(browserSpeak(s)) setStatus(`🔊 ဖုန်းအသံနဲ့ ဖတ်ပြနေပါတယ် (${why})` + (s.phoneGenderMatch ? '' : '<br><small>ဖုန်းထဲမှာ ဒီဘာသာအတွက် ' + (/^(Puck|Charon)$/.test(trVoice)?'အမျိုးသား':'အမျိုးသမီး') + 'အသံ မပါလို့ ရှိတဲ့အသံနဲ့ပဲ ဖတ်ထားပါတယ်</small>') + `<br><small style="opacity:.7">${(e && (e.raw||e.message)||'').toString().slice(0,140)}</small>`);
     else setStatus('အသံ မထွက်နိုင်ပါ ('+(e.message||e)+')။ ဘာသာပြန်စာကို ဖတ်ပြပါ။', true);
   }
 }
@@ -821,8 +822,14 @@ function browserSpeak(s){
   if(!window.speechSynthesis) return false;
   const voices = speechSynthesis.getVoices();
   const base = s.lang.bcp.split('-')[0];
-  const v = voices.find(v=>v.lang===s.lang.bcp) || voices.find(v=>v.lang && v.lang.toLowerCase().startsWith(base));
-  if(!v && voices.length) return false;
+  const same = voices.filter(v=>v.lang===s.lang.bcp || (v.lang && v.lang.toLowerCase().replace('_','-').startsWith(base)));
+  if(!same.length && voices.length) return false;
+  // Pick a voice of the chosen gender when the phone has one (names of common iPhone/Android voices).
+  const MALE = /(daniel|aaron|alex|fred|arthur|rishi|tom|lee|oliver|gordon|reed|rocko|eddy|grandpa|ralph|junior|albert|li-?mu|yu-?shu|otoya|hattori|male|man)/i;
+  const FEMALE = /(samantha|karen|moira|tessa|kate|serena|martha|kanya|linh|yuna|lekha|kyoko|ting-?ting|mei-?jia|sin-?ji|o-?ren|female|woman)/i;
+  const wantMale = /^(Puck|Charon)$/.test(trVoice);
+  const v = same.find(v=>wantMale ? MALE.test(v.name) : FEMALE.test(v.name)) || same[0];
+  s.phoneGenderMatch = !!(v && (wantMale ? MALE.test(v.name) : !MALE.test(v.name)));
   const u = new SpeechSynthesisUtterance(s.text); u.lang = s.lang.bcp; if(v) u.voice=v; u.rate=0.95;
   speechSynthesis.cancel(); speechSynthesis.speak(u); return true;
 }
