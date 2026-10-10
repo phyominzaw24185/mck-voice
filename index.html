@@ -461,7 +461,8 @@ async function process(blob, name){
     const p = postPrompt(text);
     if(p){ setStatus('<span class="spinner"></span> '+MODE_LABEL[mode]+' ပြုလုပ်နေပါတယ်…'); text = await gemini([{ text:p }]); }
     showResult(text, duration);
-    addHistory(text, duration);
+    const hid = addHistory(text, duration);
+    if(blob.size < 25e6) saveAudio(hid, { src: blob });
     setStatus('ပြီးပါပြီ ✓');
   }catch(e){
     console.error(e);
@@ -532,9 +533,57 @@ idleWave();
 $('fileIn').onchange = e=>{ const f=e.target.files[0]; if(f){ $('timer').textContent='--:--'; process(f, f.name); } e.target.value=''; };
 
 // ---------- history ----------
+// Recordings live in IndexedDB (too big for localStorage). Only the newest AUDIO_KEEP items keep sound.
+const AUDIO_KEEP = 40;
+const audioDB = (()=>{
+  let dbp=null;
+  const open=()=> dbp || (dbp = new Promise((res,rej)=>{
+    const r=indexedDB.open('mck-audio',1);
+    r.onupgradeneeded=()=>r.result.createObjectStore('clips');
+    r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error);
+  }));
+  const tx=async(mode, fn)=>{ const db=await open(); return new Promise((res,rej)=>{ const t=db.transaction('clips',mode); const req=fn(t.objectStore('clips')); t.oncomplete=()=>res(req&&req.result); t.onerror=()=>rej(t.error); }); };
+  return {
+    get:id=>tx('readonly', s=>s.get(id)).catch(()=>null),
+    put:(id,v)=>tx('readwrite', s=>s.put(v,id)).catch(()=>null),
+    del:id=>tx('readwrite', s=>s.delete(id)).catch(()=>null),
+    clear:()=>tx('readwrite', s=>s.clear()).catch(()=>null),
+  };
+})();
+async function saveAudio(id, patch){
+  const cur = await audioDB.get(id) || {};
+  await audioDB.put(id, { ...cur, ...patch });
+  const h = history.find(x=>x.id===id); if(!h) return;
+  if(patch.src) h.hasSrc=true; if(patch.out) h.hasOut=true;
+  // drop sound from older items
+  history.slice(AUDIO_KEEP).forEach(o=>{ if(o.hasSrc||o.hasOut){ o.hasSrc=o.hasOut=false; audioDB.del(o.id); } });
+  store.set('mck.hist', history); renderHistory();
+}
+async function playClip(id, which){
+  unlockAudio();
+  const rec = await audioDB.get(id); const blob = rec && rec[which];
+  if(!blob){ toast('အသံဖိုင် မရှိတော့ပါ'); return; }
+  try{ window.speechSynthesis && speechSynthesis.cancel(); }catch(e){}
+  if(playClip.url) URL.revokeObjectURL(playClip.url);
+  playClip.url = URL.createObjectURL(blob);
+  player.src = playClip.url; player.play().catch(()=>toast('ထပ်နှိပ်ပြီး နားထောင်ပါ'));
+}
+async function shareClip(id, which){
+  const rec = await audioDB.get(id); const blob = rec && rec[which];
+  if(!blob){ toast('အသံဖိုင် မရှိတော့ပါ'); return; }
+  const ext = /wav/.test(blob.type) ? 'wav' : /mp4|m4a|aac/.test(blob.type) ? 'm4a' : /mpeg/.test(blob.type) ? 'mp3' : 'webm';
+  const file = new File([blob], `mck-${which==='out'?'translation':'recording'}-${id}.${ext}`, { type: blob.type || 'audio/wav' });
+  if(navigator.canShare && navigator.canShare({ files:[file] })){
+    try{ await navigator.share({ files:[file] }); return; }catch(e){ if(e.name==='AbortError') return; }
+  }
+  const a=document.createElement('a'); a.href=URL.createObjectURL(file); a.download=file.name; document.body.appendChild(a); a.click(); a.remove();
+}
 function addHistory(text, duration, extra){
-  history.unshift({ id:Date.now(), at:new Date().toISOString(), mode, lang, duration, text, ...(extra||{}) });
+  const id = Date.now();
+  history.unshift({ id, at:new Date().toISOString(), mode, lang, duration, text, ...(extra||{}) });
+  history.slice(200).forEach(o=>audioDB.del(o.id));
   history = history.slice(0,200); store.set('mck.hist', history); renderHistory();
+  return id;
 }
 function renderHistory(){
   const el=$('hist'); el.innerHTML='';
@@ -542,14 +591,18 @@ function renderHistory(){
   for(const h of history){
     const d=new Date(h.at);
     const item=document.createElement('div'); item.className='item';
-    item.innerHTML=`<div class="item-meta"><span>${d.toLocaleDateString('en-GB')} ${d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})} · ${fmt(h.duration||0)}</span><span class="tag">${h.tag || ((MODE_LABEL[h.mode]||'') + (h.lang && h.lang!=='mix' ? ' · '+LANG_LABEL[h.lang] : ''))}</span></div><div class="item-text"></div><div class="actions"><button class="btn" data-a="copy" type="button">Copy</button><button class="btn" data-a="share" type="button">Share</button><button class="btn" data-a="more" type="button">အပြည့်ကြည့်</button><button class="btn" data-a="del" type="button">ဖျက်</button></div>`;
+    item.innerHTML=`<div class="item-meta"><span>${d.toLocaleDateString('en-GB')} ${d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})} · ${fmt(h.duration||0)}</span><span class="tag">${h.tag || ((MODE_LABEL[h.mode]||'') + (h.lang && h.lang!=='mix' ? ' · '+LANG_LABEL[h.lang] : ''))}</span></div><div class="item-text"></div>${(h.hasSrc||h.hasOut)?`<div class="actions" style="margin-bottom:8px">${h.hasSrc?`<button class="btn" data-a="psrc" type="button">▶ မူရင်းအသံ</button>`:''}${h.hasOut?`<button class="btn primary" data-a="pout" type="button">▶ ဘာသာပြန်အသံ</button><button class="btn" data-a="sout" type="button">⤴ အသံပို့</button>`:''}${h.hasSrc&&!h.hasOut?`<button class="btn" data-a="ssrc" type="button">⤴ အသံပို့</button>`:''}</div>`:''}<div class="actions"><button class="btn" data-a="copy" type="button">Copy</button><button class="btn" data-a="share" type="button">Share</button><button class="btn" data-a="more" type="button">အပြည့်ကြည့်</button><button class="btn" data-a="del" type="button">ဖျက်</button></div>`;
     item.querySelector('.item-text').textContent=h.text;
     item.addEventListener('click', e=>{
       const a=e.target.closest('button')?.dataset.a; if(!a) return;
       if(a==='copy') copyText(h.text);
       if(a==='share') shareText(h.text);
+      if(a==='psrc') playClip(h.id,'src');
+      if(a==='pout') playClip(h.id,'out');
+      if(a==='sout') shareClip(h.id,'out');
+      if(a==='ssrc') shareClip(h.id,'src');
       if(a==='more'){ item.classList.toggle('open'); e.target.textContent=item.classList.contains('open')?'ချုံ့မည်':'အပြည့်ကြည့်'; }
-      if(a==='del'){ if(e.target.dataset.confirm){ history=history.filter(x=>x.id!==h.id); store.set('mck.hist',history); renderHistory(); }
+      if(a==='del'){ if(e.target.dataset.confirm){ audioDB.del(h.id); history=history.filter(x=>x.id!==h.id); store.set('mck.hist',history); renderHistory(); }
                      else { e.target.dataset.confirm='1'; e.target.textContent='သေချာလား?'; e.target.classList.add('primary'); } }
     });
     el.appendChild(item);
@@ -557,7 +610,7 @@ function renderHistory(){
 }
 $('clearHist').onclick = e=>{
   const b=e.currentTarget;
-  if(b.dataset.confirm){ history=[]; store.set('mck.hist',history); renderHistory(); delete b.dataset.confirm; b.textContent='အားလုံးဖျက်'; }
+  if(b.dataset.confirm){ audioDB.clear(); history=[]; store.set('mck.hist',history); renderHistory(); delete b.dataset.confirm; b.textContent='အားလုံးဖျက်'; }
   else { b.dataset.confirm='1'; b.textContent='သေချာလား? ထပ်နှိပ်ပါ'; setTimeout(()=>{ delete b.dataset.confirm; b.textContent='အားလုံးဖျက်'; },3000); }
 };
 
@@ -680,8 +733,9 @@ Return JSON only: {"source_text": "...", "translation": "..."}`;
     $('trSrc').textContent = srcText; $('trSrc').lang = src.bcp;
     $('trOut').textContent = trText; $('trOut').lang = dst.bcp;
     $('trOutLabel').textContent = `${dst.my} — ${dst.label}`;
-    addHistory(`${srcText}\n\n→ ${trText}`, duration, { mode:'voice', tag:`စကားပြန် · ${src.label} → ${dst.label}` });
-    lastSpeech = { text: trText, lang: dst, url: null };
+    const hid = addHistory(`${srcText}\n\n→ ${trText}`, duration, { mode:'voice', tag:`စကားပြန် · ${src.label} → ${dst.label}` });
+    saveAudio(hid, { src: blob });
+    lastSpeech = { text: trText, lang: dst, url: null, hid };
     if(chunks.length>1) toast('၅ မိနစ်ထက် ရှည်လို့ အစပိုင်း ၅ မိနစ်ကိုပဲ ပြန်ဆိုထားပါတယ်');
     await speak(lastSpeech);
   }catch(e){
@@ -700,7 +754,9 @@ async function speak(s){
   try{
     if(!s.url){
       setStatus('<span class="spinner"></span> အသံထုတ်နေပါတယ်…');
-      s.url = URL.createObjectURL(await ttsAudio(s.text));
+      s.blob = await ttsAudio(s.text);
+      s.url = URL.createObjectURL(s.blob);
+      if(s.hid) saveAudio(s.hid, { out: s.blob });
     }
     player.src = s.url;
     await player.play();
