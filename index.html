@@ -178,8 +178,9 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
       <span class="label" id="trOutLabel" style="margin-top:6px"></span>
       <div class="tr-out" id="trOut"></div>
       <div class="actions">
-        <button class="btn primary" id="trPlay" type="button">▶ ပြန်ဖွင့်</button>
+        <span class="chip-group" id="trVoices"></span>
         <button class="btn" id="trCopy" type="button">Copy</button>
+        <button class="btn" id="trShareAudio" type="button">⤴ အသံပို့</button>
         <button class="btn" id="trShare" type="button">Share</button>
       </div>
     </div>
@@ -595,7 +596,7 @@ function renderHistory(){
   for(const h of history){
     const d=new Date(h.at);
     const item=document.createElement('div'); item.className='item';
-    item.innerHTML=`<div class="item-meta"><span>${d.toLocaleDateString('en-GB')} ${d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})} · ${fmt(h.duration||0)}</span><span class="tag">${h.tag || ((MODE_LABEL[h.mode]||'') + (h.lang && h.lang!=='mix' ? ' · '+LANG_LABEL[h.lang] : ''))}</span></div><div class="item-text"></div>${(h.hasSrc||h.hasOut)?`<div class="actions" style="margin-bottom:8px">${h.hasSrc?`<button class="btn" data-a="psrc" type="button">▶ မူရင်းအသံ</button>`:''}${h.hasOut?`<button class="btn primary" data-a="pout" type="button">▶ ဘာသာပြန်အသံ</button><button class="btn" data-a="sout" type="button">⤴ အသံပို့</button>`:''}${h.hasSrc&&!h.hasOut?`<button class="btn" data-a="ssrc" type="button">⤴ အသံပို့</button>`:''}</div>`:''}<div class="actions"><button class="btn" data-a="re" type="button">🌐 တခြားဘာသာ</button><button class="btn" data-a="copy" type="button">Copy</button><button class="btn" data-a="share" type="button">Share</button><button class="btn" data-a="more" type="button">အပြည့်ကြည့်</button><button class="btn" data-a="del" type="button">ဖျက်</button></div>`;
+    item.innerHTML=`<div class="item-meta"><span>${d.toLocaleDateString('en-GB')} ${d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})} · ${fmt(h.duration||0)}</span><span class="tag">${h.tag || ((MODE_LABEL[h.mode]||'') + (h.lang && h.lang!=='mix' ? ' · '+LANG_LABEL[h.lang] : ''))}</span></div><div class="item-text"></div>${(h.hasSrc||h.hasOut)?`<div class="actions" style="margin-bottom:8px">${h.hasSrc?`<button class="btn" data-a="psrc" type="button">▶ မူရင်းအသံ</button>`:''}${h.hasOut?`<button class="btn primary" data-a="pout" type="button">▶ ဘာသာပြန်အသံ</button><button class="btn" data-a="sout" type="button">⤴ အသံပို့</button>`:''}${h.hasSrc&&!h.hasOut?`<button class="btn" data-a="ssrc" type="button">⤴ အသံပို့</button>`:''}</div>`:''}<div class="actions">${h.mode==='voice'?'<button class="btn" data-a="voice" type="button">🗣 အသံပြောင်း</button>':''}<button class="btn" data-a="re" type="button">🌐 တခြားဘာသာ</button><button class="btn" data-a="copy" type="button">Copy</button><button class="btn" data-a="share" type="button">Share</button><button class="btn" data-a="more" type="button">အပြည့်ကြည့်</button><button class="btn" data-a="del" type="button">ဖျက်</button></div>`;
     item.querySelector('.item-text').textContent=h.text;
     const pick=document.createElement('div'); pick.className='chip-group re-pick'; pick.hidden=true;
     pick.innerHTML='<span class="label" style="width:100%">ဘယ်ဘာသာကို ပြောင်းမလဲ</span>' + reTargets(h).map(([k,L])=>`<button class="chip" type="button" data-re="${k}">${L.my} — ${L.label}</button>`).join('');
@@ -604,6 +605,7 @@ function renderHistory(){
       const rb=e.target.closest('[data-re]'); if(rb){ pick.hidden=true; retranslate(h, rb.dataset.re); return; }
       const a=e.target.closest('button')?.dataset.a; if(!a) return;
       if(a==='re'){ pick.hidden=!pick.hidden; return; }
+      if(a==='voice'){ openInCard(h); return; }
       if(a==='copy') copyText(h.text);
       if(a==='share') shareText(h.text);
       if(a==='psrc') playClip(h.id,'src');
@@ -761,19 +763,23 @@ Return JSON only: {"source_text": "...", "translation": "..."}`;
 async function speak(s){
   statusTarget='tStatus';
   try{
-    if(!s.url){
-      setStatus('<span class="spinner"></span> အသံထုတ်နေပါတယ်…');
-      s.blob = await ttsAudio(s.text);
-      s.url = URL.createObjectURL(s.blob);
-      if(s.hid) saveAudio(s.hid, { out: s.blob });
+    s.cache = s.cache || {};
+    const voice = trVoice;
+    if(!s.cache[voice]){
+      setStatus(`<span class="spinner"></span> ${VOICE_LABEL[voice]||voice} အသံ ထုတ်နေပါတယ်…`);
+      const blob = await ttsAudio(s.text);
+      s.cache[voice] = { blob, url: URL.createObjectURL(blob) };
+      if(s.hid) saveAudio(s.hid, { out: blob });
     }
+    s.blob = s.cache[voice].blob; s.url = s.cache[voice].url; s.voice = voice;
+    renderVoiceBtns();
     player.src = s.url;
     await player.play();
     setStatus('🔊 ဖတ်ပြနေပါတယ်');
     player.onended = ()=>setStatus('ပြီးပါပြီ ✓ · နောက်တစ်ခွန်း ပြောနိုင်ပါပြီ');
   }catch(e){
     console.warn('TTS', e);
-    if(e && e.name==='NotAllowedError'){ setStatus('▶ ပြန်ဖွင့် ကို နှိပ်ပြီး နားထောင်ပါ'); return; }
+    if(e && e.name==='NotAllowedError'){ setStatus('အောက်က ▶ အသံခလုတ်ကို နှိပ်ပြီး နားထောင်ပါ'); return; }
     if(browserSpeak(s)) setStatus('🔊 ဖုန်းအသံနဲ့ ဖတ်ပြနေပါတယ် (Gemini အသံ မရလို့)');
     else setStatus('အသံ မထွက်နိုင်ပါ ('+(e.message||e)+')။ ဘာသာပြန်စာကို ဖတ်ပြပါ။', true);
   }
@@ -830,7 +836,37 @@ function pcmToWav(bytes, rate){
   v.setUint32(28,rate*2,true); v.setUint16(32,2,true); v.setUint16(34,16,true); w(36,'data'); v.setUint32(40,bytes.length,true);
   new Uint8Array(buf, 44).set(bytes); return buf;
 }
-$('trPlay').onclick = ()=>{ unlockAudio(); if(lastSpeech) speak(lastSpeech); };
+const VOICE_LABEL = { Kore:'အမျိုးသမီး', Aoede:'အမျိုးသမီး ၂', Puck:'အမျိုးသား', Charon:'အမျိုးသား ၂' };
+function renderVoiceBtns(){
+  const box=$('trVoices'); box.innerHTML='';
+  for(const [v,label] of Object.entries(VOICE_LABEL)){
+    const b=document.createElement('button'); b.type='button'; b.className='chip'; b.dataset.voice=v;
+    b.textContent='▶ '+label; b.setAttribute('aria-pressed', String(v===trVoice));
+    box.appendChild(b);
+  }
+}
+$('trVoices').addEventListener('click', e=>{
+  const b=e.target.closest('[data-voice]'); if(!b || !lastSpeech) return;
+  unlockAudio();
+  trVoice=b.dataset.voice; $('trVoice').value=trVoice; store.set('mck.trVoice',trVoice);
+  renderVoiceBtns(); speak(lastSpeech);
+});
+$('trShareAudio').onclick = ()=>{ if(lastSpeech && lastSpeech.hid) shareClip(lastSpeech.hid,'out'); else toast('အသံ မရှိသေးပါ'); };
+renderVoiceBtns();
+// Open a saved translation in the result card so it can be heard in another voice.
+function openInCard(h){
+  const [srcText, trText=''] = h.text.split('\n\n→ ');
+  const label = (h.tag||'').split('→ ')[1];
+  const key = h.dstKey || Object.keys(TR_LANGS).find(k=>TR_LANGS[k].label===label) || (label===MY.label ? 'my' : null);
+  if(!key || !trText){ toast('ဒီမှတ်တမ်းကို အသံပြောင်းလို့ မရပါ'); return; }
+  const dst = key==='my' ? MY : TR_LANGS[key];
+  tab='tr'; store.set('mck.tab',tab); renderTab(); window.scrollTo({ top:0, behavior:'smooth' });
+  $('trResult').hidden=false;
+  $('trSrc').textContent=(h.src ?? srcText).trim(); $('trOut').textContent=trText.trim(); $('trOut').lang=dst.bcp;
+  $('trOutLabel').textContent=`${dst.my} — ${dst.label}`;
+  lastSpeech = { text: trText.trim(), lang: dst, hid: h.id };
+  statusTarget='tStatus'; setStatus('အောက်က အသံတစ်မျိုးကို ရွေးပြီး နားထောင်ပါ');
+}
 $('trCopy').onclick = ()=>copyText($('trOut').textContent);
 $('trShare').onclick = ()=>shareText(`${$('trSrc').textContent}\n\n${$('trOut').textContent}`);
 
