@@ -388,12 +388,25 @@ async function netFetch(url, opts){
     err.network = true; err.retryable = true; throw err;
   }
 }
+// Short thinking = much faster answers. Older/odd models that reject it are remembered and sent without.
+const noThink = new Set(store.get('mck.noThink', []));
+function thinkingFor(model){
+  if(noThink.has(model)) return null;
+  if(/gemini-3/.test(model)) return { thinkingLevel:'low' };
+  if(/gemini-2\.5-flash/.test(model)) return { thinkingBudget:0 };
+  return null;
+}
 async function geminiOnce(parts, model, gen){
+  const think = thinkingFor(model);
   const res = await netFetch(`${API}/models/${encodeURIComponent(model)}:generateContent`, {
     method:'POST',
     headers:{'Content-Type':'application/json','x-goog-api-key':cfg.key},
-    body: JSON.stringify({ contents:[{ role:'user', parts }], generationConfig:{ temperature:0.2, ...(gen||{}) } })
+    body: JSON.stringify({ contents:[{ role:'user', parts }], generationConfig:{ temperature:0.2, ...(think?{ thinkingConfig:think }:{}), ...(gen||{}) } })
   });
+  if(think && res.status===400){
+    const peek = await res.clone().json().catch(()=>({}));
+    if(/think/i.test(peek?.error?.message||'')){ noThink.add(model); store.set('mck.noThink',[...noThink]); return geminiOnce(parts, model, gen); }
+  }
   const json = await res.json().catch(()=>null);
   if(!json){ const err=new Error('အင်တာနက် ချိတ်ဆက်မှု မကောင်းပါ။ "ပြန်စမ်းမည်" ကို နှိပ်ပါ။'); err.network=true; err.retryable=true; throw err; }
   if(!res.ok) throw apiError(res, json, model);
