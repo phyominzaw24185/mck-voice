@@ -416,7 +416,8 @@ async function withNetRetry(fn){
 // A stuck mobile connection can hang forever, so give up after REQ_TIMEOUT and retry.
 const REQ_TIMEOUT = 30000;
 async function netFetch(url, opts){
-  const ctl = new AbortController(); const t = setTimeout(()=>ctl.abort(), REQ_TIMEOUT);
+  const size = (opts && typeof opts.body==='string') ? opts.body.length : 0;
+  const ctl = new AbortController(); const t = setTimeout(()=>ctl.abort(), REQ_TIMEOUT + size/25);
   try{ return await fetch(url, { ...opts, signal: ctl.signal }); }
   catch(e){
     const slow = e.name==='AbortError';
@@ -467,6 +468,25 @@ function b64(buf){
 }
 
 // ---------- audio → 16 kHz mono WAV chunks ----------
+// Send the phone's own compressed recording when possible: ~10x smaller than WAV, so it uploads
+// much faster on mobile data. If Google refuses that format, fall back to WAV and remember.
+let useNative = !store.get('mck.noNative', false);
+const NATIVE_TYPES = /^audio\/(mp4|x-m4a|m4a|aac|mpeg|mp3|ogg|webm|wav|x-wav|flac)$/;
+async function audioPayloads(blob){
+  const { chunks, duration } = await toWavChunks(blob);
+  const type = (blob.type||'').split(';')[0].replace('x-m4a','mp4').replace('m4a','mp4');
+  const native = useNative && chunks.length===1 && blob.size < 14e6 && NATIVE_TYPES.test(type);
+  const wav = chunks.map(c=>({ inline_data:{ mime_type:'audio/wav', data: b64(c) } }));
+  return { duration, native, parts: native ? [{ inline_data:{ mime_type:type, data: b64(await blob.arrayBuffer()) } }] : wav, wav };
+}
+// Run fn(audioPart) on the compressed audio; if Google rejects the format, redo with WAV.
+async function withAudio(pay, i, fn){
+  try{ return await fn(pay.parts[i]); }
+  catch(e){
+    if(pay.native && e.status===400){ useNative=false; store.set('mck.noNative', true); pay.native=false; pay.parts=pay.wav; return fn(pay.parts[i]); }
+    throw e;
+  }
+}
 async function toWavChunks(blob){
   const AC = window.AudioContext || window.webkitAudioContext;
   const ctx = new AC();
@@ -500,11 +520,11 @@ async function process(blob, name){
   lastAudio = { blob, name };
   try{
     setStatus('<span class="spinner"></span> အသံကို ပြင်ဆင်နေပါတယ်…');
-    const { chunks, duration } = await toWavChunks(blob);
+    const pay = await audioPayloads(blob); const duration = pay.duration;
     const pieces=[];
-    for(let i=0;i<chunks.length;i++){
-      setStatus(`<span class="spinner"></span> စာအဖြစ် ပြောင်းနေပါတယ်… ${chunks.length>1?`(${i+1}/${chunks.length})`:''}`);
-      pieces.push(await gemini([{ text: transcribePrompt() }, { inline_data:{ mime_type:'audio/wav', data: b64(chunks[i]) } }]));
+    for(let i=0;i<pay.parts.length;i++){
+      setStatus(`<span class="spinner"></span> စာအဖြစ် ပြောင်းနေပါတယ်… ${pay.parts.length>1?`(${i+1}/${pay.parts.length})`:''}`);
+      pieces.push(await withAudio(pay, i, part=>gemini([{ text: transcribePrompt() }, part])));
     }
     let text = pieces.join('\n\n');
     const transcript = text;
@@ -828,16 +848,16 @@ async function interpret(blob, dir){
   const src = dir==='me' ? MY : L, dst = dir==='me' ? L : MY;
   try{
     setStatus('<span class="spinner"></span> ဘာသာပြန်နေပါတယ်…');
-    const { chunks, duration } = await toWavChunks(blob);
+    const pay = await audioPayloads(blob); const duration = pay.duration;
     const vocab = cfg.vocab ? ` Names/terms that may appear: ${cfg.vocab}.` : '';
     const prompt = `You are a professional live interpreter. The audio is spoken mainly in ${src.name}; it may contain some English words.${vocab}
 1) Transcribe exactly what was said, in its original language and script (Burmese in Myanmar Unicode script, never Zawgyi).
 2) Translate it into ${dst.name} the way a human interpreter would say it out loud: natural, polite, spoken style, same meaning, nothing added or left out. Keep names and numbers.
 Return JSON only: {"source_text": "...", "translation": "..."}`;
-    const raw = await gemini([{ text: prompt }, { inline_data:{ mime_type:'audio/wav', data: b64(chunks[0]) } }], {
+    const raw = await withAudio(pay, 0, part=>gemini([{ text: prompt }, part], {
       responseMimeType:'application/json',
       responseSchema:{ type:'OBJECT', properties:{ source_text:{type:'STRING'}, translation:{type:'STRING'} }, required:['source_text','translation'] }
-    }, trFast);
+    }, trFast));
     let out; try{ out = JSON.parse(raw); }catch(e){ out = { source_text:'', translation: raw }; }
     const srcText=(out.source_text||'').trim(), trText=(out.translation||'').trim();
     if(!trText) throw new Error('စကားသံ မကြားရပါ။ ဖုန်းကို နီးနီးကပ်ပြီး ထပ်ပြောကြည့်ပါ။');
@@ -848,7 +868,7 @@ Return JSON only: {"source_text": "...", "translation": "..."}`;
     const hid = addHistory(`${srcText}\n\n→ ${trText}`, duration, { mode:'voice', tag:`စကားပြန် · ${src.label} → ${dst.label}`, src: srcText, srcLabel: src.label, srcName: src.name, dstKey: dir==='me' ? trLang : 'my' });
     saveAudio(hid, { src: blob });
     lastSpeech = { text: trText, lang: dst, url: null, hid };
-    if(chunks.length>1) toast('၅ မိနစ်ထက် ရှည်လို့ အစပိုင်း ၅ မိနစ်ကိုပဲ ပြန်ဆိုထားပါတယ်');
+    if(pay.wav.length>1) toast('၅ မိနစ်ထက် ရှည်လို့ အစပိုင်း ၅ မိနစ်ကိုပဲ ပြန်ဆိုထားပါတယ်');
     await speak(lastSpeech);
   }catch(e){
     console.error(e);
