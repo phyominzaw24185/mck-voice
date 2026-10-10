@@ -307,7 +307,7 @@ let statusTarget='status';
 let busyStart=0;
 function setStatus(html, isErr){
   const s=$(statusTarget);
-  s.innerHTML = html + (/spinner/.test(html) && busyStart ? ' <span class="secs" style="font-variant-numeric:tabular-nums;opacity:.7"></span>' : '');
+  s.innerHTML = html + (/spinner/.test(html) && busyStart && !/class="secs"/.test(html) ? ' <span class="secs" style="font-variant-numeric:tabular-nums;opacity:.7"></span>' : '');
   s.classList.toggle('err', !!isErr); tickSecs();
 }
 function tickSecs(){ const n=Math.floor((Date.now()-busyStart)/1000); document.querySelectorAll('.secs').forEach(x=>x.textContent=`${n} စက္ကန့်`); }
@@ -381,33 +381,35 @@ function liteModel(){
   const list = cfg.models||[];
   return list.find(m=>/flash-lite/.test(m) && !/(tts|image|live|transcribe)/.test(m)) || 'gemini-3.5-flash-lite';
 }
+// A model that just said "busy" is skipped for a while, so the next request goes straight to one that answers.
+const busyUntil = {};
+const GIVE_UP_MS = 60000;
 async function gemini(parts, gen, fast){
-  const models = fast ? Array.from(new Set([liteModel(), ...fallbackModels()])) : fallbackModels(); let lastErr;
+  let models = fast ? Array.from(new Set([liteModel(), ...fallbackModels()])) : fallbackModels();
+  const now = Date.now();
+  models = [...models.filter(m=>!(busyUntil[m]>now)), ...models.filter(m=>busyUntil[m]>now)];
+  const t0 = Date.now(); let lastErr;
   for(let mi=0; mi<models.length; mi++){
-    for(let attempt=0; attempt<2; attempt++){
-      try{ return await withNetRetry(()=>geminiOnce(parts, models[mi], gen)); }
-      catch(e){
-        lastErr = e;
-        if(!e.retryable || e.network) throw e;
-        const next = attempt===0 ? `${models[mi]} ကို ပြန်စမ်းနေပါတယ်…` : (models[mi+1] ? `${models[mi+1]} နဲ့ ပြောင်းစမ်းနေပါတယ်…` : '');
-        if(next) setStatus(`<span class="spinner"></span> Model အလုပ်များနေလို့ ${next}`);
-        if(attempt===0) await sleep(2500);
-      }
+    if(Date.now()-t0 > GIVE_UP_MS) break;
+    try{ return await withNetRetry(()=>geminiOnce(parts, models[mi], gen)); }
+    catch(e){
+      lastErr = e;
+      if(!e.retryable || e.network) throw e;
+      busyUntil[models[mi]] = Date.now() + 10*60*1000;
+      if(models[mi+1]) setStatus(`<span class="spinner"></span> ${models[mi]} အလုပ်များနေလို့ ${models[mi+1]} နဲ့ ပြောင်းစမ်းနေပါတယ်…`);
     }
   }
-  throw lastErr;
+  const err = new Error('Google ဘက်က Model တွေ အလုပ်အရမ်းများနေပါတယ်။ ၁-၂ မိနစ်နေမှ "ပြန်စမ်းမည်" ကို နှိပ်ပါ (သို့) ⚡ အမြန်မုဒ် ကို ဖွင့်ကြည့်ပါ။');
+  err.retryable = true; err.cause = lastErr; throw err;
 }
-// Mobile data drops requests now and then ("Load failed" on iPhone). Retry those quietly.
 async function withNetRetry(fn){
-  const waits=[1500, 3000, 5000];
+  const waits=[1000, 2500];
   for(let i=0;;i++){
     try{ return await fn(); }
     catch(e){
       if(!e.network || i>=waits.length) throw e;
-      const prev = $(statusTarget).innerHTML;
       setStatus(`<span class="spinner"></span> အင်တာနက် ပြတ်သွားလို့ ပြန်ပို့နေပါတယ်… (${i+1}/${waits.length})`);
       await sleep(waits[i]);
-      setStatus(prev);
     }
   }
 }
