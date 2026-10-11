@@ -309,7 +309,9 @@ let statusTarget='status';
 let busyStart=0;
 function setStatus(html, isErr){
   const s=$(statusTarget);
-  s.innerHTML = html + (/spinner/.test(html) && busyStart && !/class="secs"/.test(html) ? ' <span class="secs" style="font-variant-numeric:tabular-nums;opacity:.7"></span>' : '');
+  const busyNow = /spinner/.test(html) && busyStart && !/class="secs"/.test(html);
+  s.innerHTML = html + (busyNow ? ' <span class="secs" style="font-variant-numeric:tabular-nums;opacity:.7"></span>' : '')
+    + (busyNow && job && !job.ctl.signal.aborted ? '<div class="actions" style="justify-content:center;margin-top:8px"><button class="btn" type="button" data-job="resend">↻ ရပ်ပြီး ပြန်ပို့မည်</button><button class="btn" type="button" data-job="discard">✕ ဖျက်မည်</button></div>' : '');
   s.classList.toggle('err', !!isErr); tickSecs();
 }
 function tickSecs(){ const n=Math.floor((Date.now()-busyStart)/1000); document.querySelectorAll('.secs').forEach(x=>x.textContent=`${n} စက္ကန့်`); }
@@ -384,7 +386,7 @@ function liteModel(){
   return list.find(m=>/flash-lite/.test(m) && !/(tts|image|live|transcribe)/.test(m)) || 'gemini-3.5-flash-lite';
 }
 // A model that just said "busy" is skipped for a while, so the next request goes straight to one that answers.
-const busyUntil = {};
+const busyUntil = store.get('mck.busyUntil', {});
 const GIVE_UP_MS = 60000;
 async function gemini(parts, gen, fast){
   let models = fast ? Array.from(new Set([liteModel(), ...fallbackModels()])) : fallbackModels();
@@ -396,8 +398,8 @@ async function gemini(parts, gen, fast){
     try{ return await withNetRetry(()=>geminiOnce(parts, models[mi], gen)); }
     catch(e){
       lastErr = e;
-      if(!e.retryable || e.network) throw e;
-      busyUntil[models[mi]] = Date.now() + 10*60*1000;
+      if(e.cancelled || !e.retryable || e.network) throw e;
+      busyUntil[models[mi]] = Date.now() + 10*60*1000; store.set('mck.busyUntil', busyUntil);
       if(models[mi+1]) setStatus(`<span class="spinner"></span> ${models[mi]} အလုပ်များနေလို့ ${models[mi+1]} နဲ့ ပြောင်းစမ်းနေပါတယ်…`);
     }
   }
@@ -409,19 +411,36 @@ async function withNetRetry(fn){
   for(let i=0;;i++){
     try{ return await fn(); }
     catch(e){
-      if(!e.network || i>=waits.length) throw e;
+      if(e.cancelled || !e.network || i>=waits.length) throw e;
       setStatus(`<span class="spinner"></span> အင်တာနက် ပြတ်သွားလို့ ပြန်ပို့နေပါတယ်… (${i+1}/${waits.length})`);
       await sleep(waits[i]);
     }
   }
 }
+// The job in progress can be cancelled (✕) or cancelled-and-resent (↻) from the status line.
+let job=null;
+function startJob(rerun){ job={ ctl:new AbortController(), rerun, after:null }; return job; }
+function cancelled(e){ return e && (e.cancelled || (job && job.ctl.signal.aborted)); }
+// Handles a cancelled job: resend straight away, or say it was dropped. Returns true if it was a cancel.
+function finishCancel(e, j){
+  if(!cancelled(e)) return false;
+  if(j.after==='resend') setTimeout(()=>{ unlockAudio(); j.rerun(); }, 50);
+  else setStatus('🗑 ဖျက်လိုက်ပါပြီ။ ထပ်ပြောနိုင်ပါပြီ။');
+  return true;
+}
+document.addEventListener('click', e=>{
+  const b=e.target.closest('[data-job]'); if(!b || !job) return;
+  job.after = b.dataset.job; job.ctl.abort();
+});
 // A stuck mobile connection can hang forever, so give up after REQ_TIMEOUT and retry.
 const REQ_TIMEOUT = 30000;
 async function netFetch(url, opts){
   const size = (opts && typeof opts.body==='string') ? opts.body.length : 0;
   const ctl = new AbortController(); const t = setTimeout(()=>ctl.abort(), REQ_TIMEOUT + size/25);
+  const js = job && job.ctl.signal; if(js){ if(js.aborted) ctl.abort(); else js.addEventListener('abort', ()=>ctl.abort(), { once:true }); }
   try{ return await fetch(url, { ...opts, signal: ctl.signal }); }
   catch(e){
+    if(js && js.aborted){ const c=new Error('cancelled'); c.cancelled=true; throw c; }
     const slow = e.name==='AbortError';
     const err = new Error(slow ? 'အင်တာနက် အရမ်းနှေးနေပါတယ်။ ခဏနေမှ "ပြန်စမ်းမည်" ကို နှိပ်ပါ။' : 'အင်တာနက် ချိတ်ဆက်မှု မကောင်းပါ။ Wi-Fi / Data စစ်ပြီး "ပြန်စမ်းမည်" ကို နှိပ်ပါ။');
     err.network = true; err.retryable = true; throw err;
@@ -520,6 +539,7 @@ async function process(blob, name){
   if(!cfg.key){ openSettings(); toast('API key အရင်ထည့်ပါ'); return; }
   if(busy) return; busy=true; $('recBtn').disabled=true; statusTarget='status'; busyStart=Date.now();
   lastAudio = { blob, name };
+  const j = startJob(()=>process(blob, name));
   try{
     setStatus('<span class="spinner"></span> အသံကို ပြင်ဆင်နေပါတယ်…');
     const pay = await audioPayloads(blob); const duration = pay.duration;
@@ -540,10 +560,11 @@ async function process(blob, name){
     setStatus('ပြီးပါပြီ ✓');
   }catch(e){
     console.error(e);
+    if(finishCancel(e, j)) return;
     const msg = e.name==='EncodingError' || /decode/i.test(e.message) ? 'ဒီအသံဖိုင်ကို ဖတ်မရပါ။ mp3 / m4a / wav ဖိုင်နဲ့ စမ်းပါ။' : (/^(Failed to fetch|Load failed|NetworkError)/.test(e.message) ? 'အင်တာနက် ချိတ်ဆက်မှု မရပါ။' : e.message);
     setStatus(msg + '<br><button class="btn primary" type="button" id="retryBtn" style="margin-top:8px">ပြန်စမ်းမည် (အသံပြန်မဖမ်းရ)</button>', true);
     const rb = $('retryBtn'); if(rb) rb.onclick = ()=>process(blob, name);
-  }finally{ busy=false; $('recBtn').disabled=false; }
+  }finally{ busy=false; $('recBtn').disabled=false; if(job===j) job=null; }
 }
 let resultHid=null;
 function showResult(text, duration){
@@ -844,6 +865,7 @@ function onTalk(e){
 $('talkMe').onclick = onTalk; $('talkThem').onclick = onTalk;
 
 async function interpret(blob, dir){
+  const j = startJob(()=>interpret(blob, dir));
   tBusy=true; statusTarget='tStatus'; busyStart=Date.now();
   $('talkMe').disabled=true; $('talkThem').disabled=true;
   const L = TR_LANGS[trLang];
@@ -874,11 +896,12 @@ Return JSON only: {"source_text": "...", "translation": "..."}`;
     await speak(lastSpeech);
   }catch(e){
     console.error(e);
+    if(finishCancel(e, j)) return;
     const msg = /^(Failed to fetch|Load failed|NetworkError)/.test(e.message) ? 'အင်တာနက် ချိတ်ဆက်မှု မရပါ။' : e.message;
     setStatus(msg + '<br><button class="btn primary" type="button" id="tRetry" style="margin-top:8px">ပြန်စမ်းမည် (အသံပြန်မဖမ်းရ)</button>', true);
     const rb=$('tRetry'); if(rb) rb.onclick=()=>{ unlockAudio(); interpret(blob, dir); };
   }finally{
-    tBusy=false; $('talkMe').disabled=false; $('talkThem').disabled=false; renderTr();
+    tBusy=false; $('talkMe').disabled=false; $('talkThem').disabled=false; renderTr(); if(job===j) job=null;
   }
 }
 
@@ -902,6 +925,11 @@ async function speak(s){
     player.onended = ()=>setStatus('ပြီးပါပြီ ✓ · နောက်တစ်ခွန်း ပြောနိုင်ပါပြီ');
   }catch(e){
     console.warn('TTS', e);
+    if(cancelled(e)){
+      if(job && job.after==='resend'){ setTimeout(()=>{ const j=startJob(()=>speak(s)); speak(s).finally(()=>{ if(job===j) job=null; }); }, 50); }
+      else setStatus('🗑 အသံထုတ်တာ ရပ်လိုက်ပါပြီ');
+      return;
+    }
     if(e && e.name==='NotAllowedError'){ setStatus('အောက်က ▶ အသံခလုတ်ကို နှိပ်ပြီး နားထောင်ပါ'); return; }
     const why = e && e.status===429 ? 'Gemini အသံထုတ် သုံးခွင့် ဒီနေ့အတွက် ပြည့်သွားလို့' : 'Gemini အသံ မရလို့';
     if(browserSpeak(s)) setStatus(`🔊 ဖုန်းအသံနဲ့ ဖတ်ပြနေပါတယ် (${why})` + (s.phoneGenderMatch ? '' : '<br><small>ဖုန်းထဲမှာ ဒီဘာသာအတွက် ' + (/^(Puck|Charon)$/.test(trVoice)?'အမျိုးသား':'အမျိုးသမီး') + 'အသံ မပါလို့ ရှိတဲ့အသံနဲ့ပဲ ဖတ်ထားပါတယ်</small>') + `<br><small style="opacity:.7">${(e && (e.raw||e.message)||'').toString().slice(0,140)}</small>`);
@@ -1072,6 +1100,7 @@ async function retranslate(h, key){
   const srcLabel = h.srcLabel || MY.label, srcName = h.srcName || 'Burmese (or Burmese mixed with English)';
   const dst = key==='my' ? MY : TR_LANGS[key];
   tab='tr'; store.set('mck.tab',tab); renderTab(); window.scrollTo({ top:0, behavior:'smooth' });
+  const j = startJob(()=>retranslate(h, key));
   tBusy=true; statusTarget='tStatus'; busyStart=Date.now(); $('talkMe').disabled=true; $('talkThem').disabled=true;
   try{
     setStatus(`<span class="spinner"></span> ${dst.my}လို ပြောင်းနေပါတယ်…`);
@@ -1086,10 +1115,11 @@ async function retranslate(h, key){
     await speak(lastSpeech);
   }catch(e){
     console.error(e);
+    if(finishCancel(e, j)) return;
     setStatus(e.message + '<br><button class="btn primary" type="button" id="tRetry" style="margin-top:8px">ပြန်စမ်းမည်</button>', true);
     const rb=$('tRetry'); if(rb) rb.onclick=()=>retranslate(h, key);
   }finally{
-    tBusy=false; $('talkMe').disabled=false; $('talkThem').disabled=false; renderTr();
+    tBusy=false; $('talkMe').disabled=false; $('talkThem').disabled=false; renderTr(); if(job===j) job=null;
   }
 }
 
