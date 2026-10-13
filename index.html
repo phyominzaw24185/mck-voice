@@ -213,7 +213,9 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
     <div class="status" id="status">ခလုတ်နှိပ်ပြီး ပြောပါ</div>
     <div class="row">
       <label class="upload" for="fileIn">⤒ အသံဖိုင် ရွေးမည်</label>
-      <input type="file" id="fileIn" accept="audio/*,video/*" hidden>
+      <input type="file" id="fileIn" accept="audio/*" hidden>
+      <label class="upload" for="videoIn">🎬 Video ထဲက စကား</label>
+      <input type="file" id="videoIn" accept="video/*" hidden>
     </div>
     <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
       <span class="label">ထွက်လာမည့်ပုံစံ</span>
@@ -494,7 +496,18 @@ function b64(buf){
 let useNative = !store.get('mck.noNative', false);
 const NATIVE_TYPES = /^audio\/(mp4|x-m4a|m4a|aac|mpeg|mp3|ogg|webm|wav|x-wav|flac)$/;
 async function audioPayloads(blob){
-  const { chunks, duration } = await toWavChunks(blob);
+  let dec;
+  try{ dec = await toWavChunks(blob); }
+  catch(e){
+    // The phone could not unpack it (some video formats): let Gemini read the file itself if it is small enough.
+    const t=(blob.type||'').split(';')[0];
+    if(/^(video|audio)\//.test(t) && blob.size < 18e6){
+      const part={ inline_data:{ mime_type:t, data: b64(await blob.arrayBuffer()) } };
+      return { duration:0, native:false, parts:[part], wav:[part] };
+    }
+    throw e;
+  }
+  const { chunks, duration } = dec;
   const type = (blob.type||'').split(';')[0].replace('x-m4a','mp4').replace('m4a','mp4');
   const native = useNative && chunks.length===1 && blob.size < 14e6 && NATIVE_TYPES.test(type);
   const wav = chunks.map(c=>({ inline_data:{ mime_type:'audio/wav', data: b64(c) } }));
@@ -561,7 +574,7 @@ async function process(blob, name){
   }catch(e){
     console.error(e);
     if(finishCancel(e, j)) return;
-    const msg = e.name==='EncodingError' || /decode/i.test(e.message) ? 'ဒီအသံဖိုင်ကို ဖတ်မရပါ။ mp3 / m4a / wav ဖိုင်နဲ့ စမ်းပါ။' : (/^(Failed to fetch|Load failed|NetworkError)/.test(e.message) ? 'အင်တာနက် ချိတ်ဆက်မှု မရပါ။' : e.message);
+    const msg = e.name==='EncodingError' || /decode/i.test(e.message) ? (/^video\//.test(blob.type) ? 'ဒီ Video ထဲက အသံကို ဖတ်မရပါ။ iPhone ကင်မရာနဲ့ ရိုက်ထားတဲ့ video (ဒါမှမဟုတ် mp4) နဲ့ စမ်းပါ။' : 'ဒီအသံဖိုင်ကို ဖတ်မရပါ။ mp3 / m4a / wav ဖိုင်နဲ့ စမ်းပါ။') : (/^(Failed to fetch|Load failed|NetworkError)/.test(e.message) ? 'အင်တာနက် ချိတ်ဆက်မှု မရပါ။' : e.message);
     setStatus(msg + '<br><button class="btn primary" type="button" id="retryBtn" style="margin-top:8px">ပြန်စမ်းမည် (အသံပြန်မဖမ်းရ)</button>', true);
     const rb = $('retryBtn'); if(rb) rb.onclick = ()=>process(blob, name);
   }finally{ busy=false; $('recBtn').disabled=false; if(job===j) job=null; }
@@ -647,7 +660,15 @@ function idleWave(){ const cv=$('wave'), g=cv.getContext('2d'); g.clearRect(0,0,
   const bars=40,bw=cv.width/bars; for(let i=0;i<bars;i++) g.fillRect(i*bw+3,cv.height/2-2,bw-6,4); }
 idleWave();
 
-$('fileIn').onchange = e=>{ const f=e.target.files[0]; if(f){ $('timer').textContent='--:--'; process(f, f.name); } e.target.value=''; };
+function pickFile(e){
+  const f=e.target.files[0]; e.target.value='';
+  if(!f) return;
+  if(f.size > 400e6){ setStatus('Video အရမ်းကြီးလွန်းပါတယ် (400 MB ထက်ကျော်)။ တိုတိုလေး ဖြတ်ပြီးမှ ရွေးပါ။', true); return; }
+  if(/^video\//.test(f.type) && f.size > 120e6) toast('Video ကြီးလို့ ခဏကြာနိုင်ပါတယ်');
+  $('timer').textContent='--:--'; process(f, f.name);
+}
+$('fileIn').onchange = pickFile;
+$('videoIn').onchange = pickFile;
 
 // ---------- history ----------
 // Recordings live in IndexedDB (too big for localStorage). Only the newest AUDIO_KEEP items keep sound.
